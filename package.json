@@ -23,7 +23,7 @@
 	"icon": "assets/copilot.png",
 	"pricing": "Trial",
 	"engines": {
-		"vscode": "^1.108.0",
+		"vscode": "^1.107.0",
 		"npm": ">=9.0.0",
 		"node": ">=22.14.0"
 	},
@@ -1728,6 +1728,16 @@
 				"when": "productQualityType != 'stable'",
 				"displayName": "OpenAI Compatible",
 				"managementCommand": "github.copilot.chat.manageBYOK"
+			},
+			{
+				"vendor": "customize",
+				"displayName": "Customize...",
+				"managementCommand": "github.copilot.chat.manageBYOK"
+			},
+			{
+				"vendor": "custom",
+				"displayName": "Custom Providers",
+				"managementCommand": "github.copilot.chat.manageCustomProviders"
 			}
 		],
 		"interactiveSession": [
@@ -2254,6 +2264,14 @@
 				"command": "github.copilot.chat.manageBYOKAPIKey",
 				"title": "Manage Bring Your Own Key API Key",
 				"enablement": "false"
+			},
+			{
+				"command": "github.copilot.chat.customizeProvider",
+				"title": "Add Custom Provider"
+			},
+			{
+				"command": "github.copilot.chat.manageCustomProviders",
+				"title": "Manage Custom Providers"
 			},
 			{
 				"command": "github.copilot.cloud.resetWorkspaceConfirmations",
@@ -3224,6 +3242,43 @@
 							"additionalProperties": false
 						},
 						"markdownDescription": "Configure custom OpenAI-compatible models. Each key should be a unique model ID, and the value should be an object with model configuration including name, url, toolCalling, vision, maxInputTokens, and maxOutputTokens properties."
+					},
+					"github.copilot.chat.customProviders": {
+						"type": "object",
+						"default": {},
+						"tags": [
+							"experimental"
+						],
+						"additionalProperties": {
+							"type": "object",
+							"properties": {
+								"name": {
+									"type": "string",
+									"description": "Display name of the custom provider"
+								},
+								"baseUrl": {
+									"type": "string",
+									"description": "Base URL endpoint for the custom provider API"
+								},
+								"apiFormat": {
+									"type": "string",
+									"enum": [
+										"openai-chat",
+										"openai-responses",
+										"gemini",
+										"claude"
+									],
+									"description": "The API format used by this provider: openai-chat (Chat Completions), openai-responses (Responses API), gemini (Google Gemini), or claude (Anthropic Claude)"
+								}
+							},
+							"required": [
+								"name",
+								"baseUrl",
+								"apiFormat"
+							],
+							"additionalProperties": false
+						},
+						"markdownDescription": "Configure custom model providers. Each key should be a unique provider ID, and the value should include name, baseUrl, and apiFormat (openai-chat, openai-responses, gemini, or claude). API keys are stored securely and configured via the 'Customize' option in Add Models."
 					},
 					"github.copilot.chat.alternateGptPrompt.enabled": {
 						"type": "boolean",
