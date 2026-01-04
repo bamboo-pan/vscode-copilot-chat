@@ -577,7 +577,7 @@ export class CustomProvider implements BYOKModelProvider<LanguageModelChatInform
 			crlfDelay: Infinity
 		});
 
-		let pendingToolCalls: Map<string, { name: string; arguments: string }> = new Map();
+		const pendingToolCalls: Map<string, { name: string; arguments: string }> = new Map();
 
 		return new Promise<void>((resolve, reject) => {
 			token.onCancellationRequested(() => {
@@ -966,7 +966,7 @@ export class CustomProvider implements BYOKModelProvider<LanguageModelChatInform
 	 * Only used for OpenAI formats (openai-chat and openai-responses)
 	 */
 	private _buildChatUrl(): string {
-		let url = this._config.baseUrl.replace(/\/$/, '');
+		const url = this._config.baseUrl.replace(/\/$/, '');
 
 		// Check if URL already has an explicit API path
 		if (url.includes('/chat/completions') || url.includes('/responses')) {

@@ -21,7 +21,7 @@ module.exports = {
 		const filesToLint = await removeIgnoredFiles(files);
 		return [
 			`npm run tsfmt -- ${filesToLint}`,
-			`eslint --max-warnings=0 ${filesToLint}`
+			`npx tsx node_modules/eslint/bin/eslint.js --max-warnings=0 --no-warn-ignored ${filesToLint}`
 		];
 	},
 };
