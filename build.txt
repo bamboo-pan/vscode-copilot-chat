@@ -1,0 +1,7 @@
+npm install -g @vscode/vsce
+npm install
+	set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 && npm install
+	npx playwright install chromium
+npm run compile
+	node --experimental-strip-types .esbuild.ts --dev
+vsce package
