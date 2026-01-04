@@ -94,6 +94,47 @@ private _cleanSchemaForGemini(schema: any): any {
 - OpenAI Responses: `response.reasoning_summary_text.delta`
 - Claude: `delta.type === 'thinking_delta'`
 
+### 2.4 Claude Extended Thinking 多轮对话问题
+
+**问题**: 启用 `thinking` 后，多轮对话（特别是包含 tool_use 的场景）报错：
+```
+Expected thinking or redacted_thinking, but found tool_use.
+When thinking is enabled, a final assistant message must start with a thinking block.
+```
+
+**原因**: Claude API 要求在 thinking 模式下：
+1. Assistant 消息**必须**以 `thinking` 或 `redacted_thinking` block 开头
+2. 之前轮次的 thinking blocks 必须保留并完整传回（包括 signature）
+
+**错误实现**:
+```typescript
+// ❌ 只收集 thinking 文本，在 content_block_stop 时直接清除
+if (pendingThinking) {
+    pendingThinking = undefined;
+}
+```
+
+**正确实现**:
+```typescript
+// ✅ 在 content_block_stop 时，创建带有完整元数据的 ThinkingPart
+if (pendingThinking && pendingThinking.signature) {
+    const finalThinkingPart = new LanguageModelThinkingPart('');
+    finalThinkingPart.metadata = {
+        signature: pendingThinking.signature,
+        _completeThinking: pendingThinking.text
+    };
+    progress.report(finalThinkingPart);
+}
+```
+
+**关键点**:
+- `_completeThinking`: 包含完整的 thinking 文本（用于 `apiMessageToAnthropicMessage` 转换）
+- `signature`: Claude 返回的签名，必须原样传回
+- `redactedData`: 处理被审查的 thinking blocks
+
+**教训**:
+> 处理 AI 特有功能时（如 thinking），必须理解完整的消息生命周期，确保在 request → response → next request 过程中正确传递所有必要信息。
+
 ---
 
 ## 三、TypeScript 类型安全经验

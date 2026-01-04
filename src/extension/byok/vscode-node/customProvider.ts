@@ -860,6 +860,13 @@ export class CustomProvider implements BYOKModelProvider<LanguageModelChatInform
 								};
 							} else if (chunk.content_block?.type === 'thinking') {
 								pendingThinking = { text: '', signature: '' };
+							} else if (chunk.content_block?.type === 'redacted_thinking') {
+								// Handle redacted thinking blocks - emit immediately with redactedData
+								const redactedPart = new LanguageModelThinkingPart('');
+								redactedPart.metadata = {
+									redactedData: chunk.content_block.data || ''
+								};
+								progress.report(redactedPart);
 							}
 						} else if (chunk.type === 'content_block_delta') {
 							if (chunk.delta?.type === 'text_delta') {
@@ -887,6 +894,16 @@ export class CustomProvider implements BYOKModelProvider<LanguageModelChatInform
 								pendingToolCall = undefined;
 							}
 							if (pendingThinking) {
+								// Emit the final thinking part with complete content and signature
+								// This is required for multi-turn conversations with thinking enabled
+								if (pendingThinking.signature) {
+									const finalThinkingPart = new LanguageModelThinkingPart('');
+									finalThinkingPart.metadata = {
+										signature: pendingThinking.signature,
+										_completeThinking: pendingThinking.text
+									};
+									progress.report(finalThinkingPart);
+								}
 								pendingThinking = undefined;
 							}
 						}

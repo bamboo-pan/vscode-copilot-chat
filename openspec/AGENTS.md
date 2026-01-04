@@ -18,7 +18,7 @@ Instructions for AI coding assistants using OpenSpec for spec-driven development
 Create proposal when you need to:
 - Add features or functionality
 - Make breaking changes (API, schema)
-- Change architecture or patterns  
+- Change architecture or patterns
 - Optimize performance (changes behavior)
 - Update security patterns
 
@@ -147,7 +147,7 @@ openspec/
 ```
 New request?
 ├─ Bug fix restoring spec behavior? → Fix directly
-├─ Typo/format/comment? → Fix directly  
+├─ Typo/format/comment? → Fix directly
 ├─ New feature/capability? → Create proposal
 ├─ Breaking change? → Create proposal
 ├─ Architecture change? → Create proposal
@@ -245,6 +245,13 @@ Minimal `design.md` skeleton:
 - **THEN** return JWT token
 ```
 
+**中文格式也支持**:
+```markdown
+#### 场景：用户登录成功
+- **当** 提供有效凭据
+- **则** 返回 JWT 令牌
+```
+
 **WRONG** (don't use bullets or bold):
 ```markdown
 - **Scenario: User login**  ❌
@@ -256,13 +263,30 @@ Every requirement MUST have at least one scenario.
 
 ### Requirement Wording
 - Use SHALL/MUST for normative requirements (avoid should/may unless intentionally non-normative)
+- 中文可使用"应"表示规范性需求
 
 ### Delta Operations
 
-- `## ADDED Requirements` - New capabilities
-- `## MODIFIED Requirements` - Changed behavior
-- `## REMOVED Requirements` - Deprecated features
-- `## RENAMED Requirements` - Name changes
+- `## ADDED Requirements` 或 `## 新增需求` - New capabilities
+- `## MODIFIED Requirements` 或 `## 修改需求` - Changed behavior
+- `## REMOVED Requirements` 或 `## 删除需求` - Deprecated features
+- `## RENAMED Requirements` 或 `## 重命名需求` - Name changes
+
+### 中文格式说明
+
+本项目支持中文格式的 spec 文件：
+
+| 英文格式 | 中文格式 |
+|----------|----------|
+| `## Purpose` | `## 目的` |
+| `## Requirements` | `## 需求` |
+| `### Requirement: Name` | `### 需求：名称` |
+| `#### Scenario: Name` | `#### 场景：名称` |
+| `- **WHEN**` | `- **当**` |
+| `- **THEN**` | `- **则**` |
+| `- **AND**` | `- **且**` |
+
+**注意**: `openspec` CLI 工具目前主要识别英文格式。如使用中文格式，在存档时需使用 `--skip-specs` 选项，并手动更新 specs 文件。
 
 Headers matched with `trim(header)` - whitespace ignored.
 
