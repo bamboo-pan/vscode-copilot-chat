@@ -5,7 +5,8 @@
 
 import { MessageParam, TextBlockParam } from '@anthropic-ai/sdk/resources';
 import { expect, suite, test } from 'vitest';
-import { anthropicMessagesToRawMessages } from '../anthropicMessageConverter';
+import { LanguageModelChatMessage, LanguageModelThinkingPart, LanguageModelToolCallPart } from '../../../../vscodeTypes';
+import { anthropicMessagesToRawMessages, apiMessageToAnthropicMessage } from '../anthropicMessageConverter';
 
 suite('anthropicMessagesToRawMessages', function () {
 
@@ -218,5 +219,96 @@ suite('anthropicMessagesToRawMessages', function () {
 		const result = anthropicMessagesToRawMessages(messages, system);
 
 		expect(result).toMatchSnapshot();
+	});
+});
+
+suite('apiMessageToAnthropicMessage', function () {
+
+	test('injects redacted_thinking block when thinkingEnabled and assistant has tool_use but no thinking', function () {
+		// Simulates the case after context summarization where thinking blocks are stripped
+		// but tool_use blocks remain
+		const assistantMsg = LanguageModelChatMessage.Assistant('');
+		assistantMsg.content = [
+			new LanguageModelToolCallPart('call_123', 'read_file', { path: '/test.ts' }),
+		];
+		const messages = [assistantMsg];
+
+		const result = apiMessageToAnthropicMessage(messages, { thinkingEnabled: true });
+
+		// Should have one assistant message
+		expect(result.messages.length).toBe(1);
+		expect(result.messages[0].role).toBe('assistant');
+
+		const content = result.messages[0].content;
+		expect(Array.isArray(content)).toBe(true);
+
+		// First block should be redacted_thinking placeholder
+		const firstBlock = (content as any[])[0];
+		expect(firstBlock.type).toBe('redacted_thinking');
+		expect(firstBlock.data).toBe('');
+
+		// Second block should be the tool_use
+		const secondBlock = (content as any[])[1];
+		expect(secondBlock.type).toBe('tool_use');
+		expect(secondBlock.name).toBe('read_file');
+	});
+
+	test('does not inject thinking block when thinkingEnabled is false', function () {
+		const assistantMsg = LanguageModelChatMessage.Assistant('');
+		assistantMsg.content = [
+			new LanguageModelToolCallPart('call_123', 'read_file', { path: '/test.ts' }),
+		];
+		const messages = [assistantMsg];
+
+		const result = apiMessageToAnthropicMessage(messages, { thinkingEnabled: false });
+
+		const content = result.messages[0].content;
+		expect(Array.isArray(content)).toBe(true);
+
+		// Should only have tool_use, no thinking block
+		expect((content as any[]).length).toBe(1);
+		expect((content as any[])[0].type).toBe('tool_use');
+	});
+
+	test('does not inject thinking block when assistant already has thinking blocks', function () {
+		const thinkingPart = new LanguageModelThinkingPart('my thinking');
+		thinkingPart.metadata = {
+			_completeThinking: 'my thinking',
+			signature: 'sig123',
+		};
+
+		const assistantMsg = LanguageModelChatMessage.Assistant('');
+		// Use type assertion because the content setter accepts thinking parts at runtime
+		// even though the static type doesn't include them
+		(assistantMsg as any).content = [
+			thinkingPart,
+			new LanguageModelToolCallPart('call_123', 'read_file', { path: '/test.ts' }),
+		];
+		const messages = [assistantMsg];
+
+		const result = apiMessageToAnthropicMessage(messages, { thinkingEnabled: true });
+
+		const content = result.messages[0].content;
+		expect(Array.isArray(content)).toBe(true);
+
+		// Should have real thinking block first, then tool_use
+		expect((content as any[])[0].type).toBe('thinking');
+		expect((content as any[])[0].thinking).toBe('my thinking');
+		expect((content as any[])[1].type).toBe('tool_use');
+	});
+
+	test('does not inject thinking block for user messages', function () {
+		// User messages with tool_result should not get thinking blocks
+		const messages = [
+			LanguageModelChatMessage.User('Hello'),
+		];
+
+		const result = apiMessageToAnthropicMessage(messages, { thinkingEnabled: true });
+
+		const content = result.messages[0].content;
+		expect(Array.isArray(content)).toBe(true);
+
+		// Should only have text, no thinking block
+		expect((content as any[])[0].type).toBe('text');
 	});
 });

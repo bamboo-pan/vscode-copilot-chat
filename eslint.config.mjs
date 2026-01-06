@@ -331,6 +331,7 @@ export default tseslint.config(
 			'./src/extension/byok/common/geminiFunctionDeclarationConverter.ts',
 			'./src/extension/byok/common/geminiMessageConverter.ts',
 			'./src/extension/byok/vscode-node/anthropicProvider.ts',
+			'./src/extension/byok/vscode-node/customProvider.ts',
 			'./src/extension/byok/vscode-node/geminiNativeProvider.ts',
 			'./src/extension/byok/vscode-node/ollamaProvider.ts',
 			'./src/extension/chatSessions/vscode-node/copilotCloudSessionContentBuilder.ts',
