@@ -11,6 +11,8 @@ import { LanguageModelChatMessageRole, LanguageModelDataPart, LanguageModelTextP
 function apiContentToGeminiContent(content: (LanguageModelTextPart | LanguageModelToolResultPart | LanguageModelToolCallPart | LanguageModelDataPart | LanguageModelThinkingPart)[]): Part[] {
 	const thinkingParts: Part[] = [];  // Thinking must come first for Claude proxy scenarios
 	const convertedContent: Part[] = [];
+	let pendingSignature: string | undefined;
+
 	for (const part of content) {
 		if (part instanceof LanguageModelToolCallPart) {
 			// Include callId for backends that require it (e.g., cloudcode routing to Claude/GPT)
