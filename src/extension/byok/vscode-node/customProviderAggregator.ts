@@ -8,12 +8,16 @@ import { ILogService } from '../../../platform/log/common/logService';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 import { BYOKAuthType, BYOKModelProvider } from '../common/byokProvider';
 import { CustomProviderConfig } from '../common/customProviderTypes';
+import { BaseCustomProvider } from './baseCustomProvider';
 import { IBYOKStorageService } from './byokStorageService';
-import { CustomProvider } from './customProvider';
+import { ClaudeCustomProvider } from './claudeCustomProvider';
+import { GeminiCustomProvider } from './geminiCustomProvider';
+import { OpenAICustomProvider } from './openaiCustomProvider';
+import { OpenAIResponsesCustomProvider } from './openaiResponsesCustomProvider';
 
 interface ModelProviderMapping {
 	model: LanguageModelChatInformation;
-	provider: CustomProvider;
+	provider: BaseCustomProvider;
 	providerId: string;
 }
 
@@ -25,7 +29,7 @@ interface ModelProviderMapping {
 export class CustomProviderAggregator implements BYOKModelProvider<LanguageModelChatInformation> {
 	public readonly authType: BYOKAuthType = BYOKAuthType.GlobalApiKey;
 
-	private readonly _providers: Map<string, CustomProvider> = new Map();
+	private readonly _providers: Map<string, BaseCustomProvider> = new Map();
 	private _modelProviderMap: Map<string, ModelProviderMapping> = new Map();
 
 	private readonly _onDidChangeLanguageModelChatInformation = new EventEmitter<void>();
@@ -48,12 +52,7 @@ export class CustomProviderAggregator implements BYOKModelProvider<LanguageModel
 			return;
 		}
 
-		const provider = this._instantiationService.createInstance(
-			CustomProvider,
-			providerId,
-			config,
-			this._byokStorageService
-		);
+		const provider = this._createProvider(providerId, config);
 
 		// Listen to provider's model changes
 		provider.onDidChangeLanguageModelChatInformation(() => {
@@ -62,10 +61,47 @@ export class CustomProviderAggregator implements BYOKModelProvider<LanguageModel
 		});
 
 		this._providers.set(providerId, provider);
-		this._logService.info(`CustomProviderAggregator: Added provider '${config.name}' (${providerId})`);
+		this._logService.info(`CustomProviderAggregator: Added provider '${config.name}' (${providerId}) with format '${config.apiFormat}'`);
 
 		// Rebuild model map and notify
 		this._rebuildModelMapAsync();
+	}
+
+	/**
+	 * Factory method to create the appropriate provider based on API format
+	 */
+	private _createProvider(providerId: string, config: CustomProviderConfig): BaseCustomProvider {
+		switch (config.apiFormat) {
+			case 'gemini':
+				return this._instantiationService.createInstance(
+					GeminiCustomProvider,
+					providerId,
+					config,
+					this._byokStorageService
+				);
+			case 'claude':
+				return this._instantiationService.createInstance(
+					ClaudeCustomProvider,
+					providerId,
+					config,
+					this._byokStorageService
+				);
+			case 'openai-responses':
+				return this._instantiationService.createInstance(
+					OpenAIResponsesCustomProvider,
+					providerId,
+					config,
+					this._byokStorageService
+				);
+			case 'openai-chat':
+			default:
+				return this._instantiationService.createInstance(
+					OpenAICustomProvider,
+					providerId,
+					config,
+					this._byokStorageService
+				);
+		}
 	}
 
 	/**
@@ -96,7 +132,7 @@ export class CustomProviderAggregator implements BYOKModelProvider<LanguageModel
 	/**
 	 * Get a specific provider
 	 */
-	getProvider(providerId: string): CustomProvider | undefined {
+	getProvider(providerId: string): BaseCustomProvider | undefined {
 		return this._providers.get(providerId);
 	}
 

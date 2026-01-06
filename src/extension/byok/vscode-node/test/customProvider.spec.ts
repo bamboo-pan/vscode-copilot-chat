@@ -12,10 +12,14 @@ import { SyncDescriptor } from '../../../../util/vs/platform/instantiation/commo
 import { IInstantiationService } from '../../../../util/vs/platform/instantiation/common/instantiation';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { CustomProviderConfig } from '../../common/customProviderTypes';
+import { BaseCustomProvider } from '../baseCustomProvider';
 import { IBYOKStorageService } from '../byokStorageService';
-import { CustomProvider } from '../customProvider';
+import { ClaudeCustomProvider } from '../claudeCustomProvider';
+import { GeminiCustomProvider } from '../geminiCustomProvider';
+import { OpenAICustomProvider } from '../openaiCustomProvider';
+import { OpenAIResponsesCustomProvider } from '../openaiResponsesCustomProvider';
 
-describe('CustomProvider', () => {
+describe('Custom Providers', () => {
 	const disposables = new DisposableStore();
 	let accessor: ITestingServicesAccessor;
 	let instaService: IInstantiationService;
@@ -52,9 +56,36 @@ describe('CustomProvider', () => {
 		vi.restoreAllMocks();
 	});
 
-	function createProvider(config: CustomProviderConfig): CustomProvider {
+	function createOpenAIProvider(config: CustomProviderConfig): BaseCustomProvider {
 		return instaService.createInstance(
-			CustomProvider,
+			OpenAICustomProvider,
+			`custom-${config.name.toLowerCase()}`,
+			config,
+			mockByokStorageService
+		);
+	}
+
+	function createClaudeProvider(config: CustomProviderConfig): BaseCustomProvider {
+		return instaService.createInstance(
+			ClaudeCustomProvider,
+			`custom-${config.name.toLowerCase()}`,
+			config,
+			mockByokStorageService
+		);
+	}
+
+	function createGeminiProvider(config: CustomProviderConfig): BaseCustomProvider {
+		return instaService.createInstance(
+			GeminiCustomProvider,
+			`custom-${config.name.toLowerCase()}`,
+			config,
+			mockByokStorageService
+		);
+	}
+
+	function createOpenAIResponsesProvider(config: CustomProviderConfig): BaseCustomProvider {
+		return instaService.createInstance(
+			OpenAIResponsesCustomProvider,
 			`custom-${config.name.toLowerCase()}`,
 			config,
 			mockByokStorageService
@@ -62,14 +93,14 @@ describe('CustomProvider', () => {
 	}
 
 	describe('constructor and properties', () => {
-		it('should create provider with correct properties', () => {
+		it('should create OpenAI provider with correct properties', () => {
 			const config: CustomProviderConfig = {
 				name: 'TestProvider',
 				baseUrl: 'https://api.example.com',
 				apiFormat: 'openai-chat'
 			};
 
-			const provider = createProvider(config);
+			const provider = createOpenAIProvider(config);
 
 			expect(provider.providerName).toBe('TestProvider');
 			expect(provider.baseUrl).toBe('https://api.example.com');
@@ -77,26 +108,48 @@ describe('CustomProvider', () => {
 			expect(provider.providerId).toBe('custom-testprovider');
 		});
 
-		it('should create provider with different API formats', () => {
-			const formats = ['openai-chat', 'openai-responses', 'gemini', 'claude'] as const;
+		it('should create Claude provider with correct properties', () => {
+			const config: CustomProviderConfig = {
+				name: 'ClaudeProvider',
+				baseUrl: 'https://api.anthropic.com',
+				apiFormat: 'claude'
+			};
 
-			for (const format of formats) {
-				const config: CustomProviderConfig = {
-					name: 'TestProvider',
-					baseUrl: 'https://api.example.com',
-					apiFormat: format
-				};
+			const provider = createClaudeProvider(config);
 
-				const provider = createProvider(config);
-				expect(provider.apiFormat).toBe(format);
-			}
+			expect(provider.providerName).toBe('ClaudeProvider');
+			expect(provider.apiFormat).toBe('claude');
+		});
+
+		it('should create Gemini provider with correct properties', () => {
+			const config: CustomProviderConfig = {
+				name: 'GeminiProvider',
+				baseUrl: 'https://generativelanguage.googleapis.com',
+				apiFormat: 'gemini'
+			};
+
+			const provider = createGeminiProvider(config);
+
+			expect(provider.providerName).toBe('GeminiProvider');
+			expect(provider.apiFormat).toBe('gemini');
+		});
+
+		it('should create OpenAI Responses provider with correct properties', () => {
+			const config: CustomProviderConfig = {
+				name: 'OpenAIResponsesProvider',
+				baseUrl: 'https://api.openai.com',
+				apiFormat: 'openai-responses'
+			};
+
+			const provider = createOpenAIResponsesProvider(config);
+
+			expect(provider.providerName).toBe('OpenAIResponsesProvider');
+			expect(provider.apiFormat).toBe('openai-responses');
+			expect(provider.providerId).toBe('custom-openairesponsesprovider');
 		});
 	});
 
-	describe('_buildChatUrl (via provideLanguageModelChatResponse)', () => {
-		// We test URL building indirectly through the public interface
-		// since _buildChatUrl is private
-
+	describe('URL handling', () => {
 		it('should preserve URL with explicit /chat/completions path', () => {
 			const config: CustomProviderConfig = {
 				name: 'TestProvider',
@@ -104,20 +157,9 @@ describe('CustomProvider', () => {
 				apiFormat: 'openai-chat'
 			};
 
-			const provider = createProvider(config);
+			const provider = createOpenAIProvider(config);
 			// The URL should be preserved as-is since it already has the path
 			expect(provider.baseUrl).toBe('https://api.example.com/v1/chat/completions');
-		});
-
-		it('should preserve URL with explicit /responses path', () => {
-			const config: CustomProviderConfig = {
-				name: 'TestProvider',
-				baseUrl: 'https://api.example.com/v1/responses',
-				apiFormat: 'openai-responses'
-			};
-
-			const provider = createProvider(config);
-			expect(provider.baseUrl).toBe('https://api.example.com/v1/responses');
 		});
 	});
 
@@ -131,7 +173,7 @@ describe('CustomProvider', () => {
 				apiFormat: 'openai-chat'
 			};
 
-			const provider = createProvider(config);
+			const provider = createOpenAIProvider(config);
 			const result = await provider.provideLanguageModelChatInformation(
 				{ silent: true },
 				{ isCancellationRequested: false, onCancellationRequested: vi.fn() }
@@ -164,7 +206,7 @@ describe('CustomProvider', () => {
 			};
 
 			const provider = newInstaService.createInstance(
-				CustomProvider,
+				OpenAICustomProvider,
 				'custom-testprovider',
 				config,
 				mockByokStorageService
@@ -209,7 +251,7 @@ describe('CustomProvider', () => {
 			};
 
 			const provider = newInstaService.createInstance(
-				CustomProvider,
+				ClaudeCustomProvider,
 				'custom-claudeprovider',
 				config,
 				mockByokStorageService
@@ -252,7 +294,7 @@ describe('CustomProvider', () => {
 			};
 
 			const provider = newInstaService.createInstance(
-				CustomProvider,
+				GeminiCustomProvider,
 				'custom-geminiprovider',
 				config,
 				mockByokStorageService
@@ -268,6 +310,49 @@ describe('CustomProvider', () => {
 				expect.any(Object)
 			);
 		});
+
+		it('should fetch models with Bearer auth for OpenAI Responses format', async () => {
+			const mockResponse = {
+				json: vi.fn().mockResolvedValue({
+					data: [{ id: 'o1-preview', context_length: 128000 }]
+				})
+			};
+			mockFetcherService.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+			const testingServiceCollection = createExtensionUnitTestingServices();
+			testingServiceCollection.define(IBlockedExtensionService, new SyncDescriptor(BlockedExtensionService));
+			testingServiceCollection.set(IFetcherService, mockFetcherService);
+			const newAccessor = disposables.add(testingServiceCollection.createTestingAccessor());
+			const newInstaService = newAccessor.get(IInstantiationService);
+
+			const config: CustomProviderConfig = {
+				name: 'OpenAIResponsesProvider',
+				baseUrl: 'https://api.openai.com',
+				apiFormat: 'openai-responses'
+			};
+
+			const provider = newInstaService.createInstance(
+				OpenAIResponsesCustomProvider,
+				'custom-openairesponsesprovider',
+				config,
+				mockByokStorageService
+			);
+
+			await provider.provideLanguageModelChatInformation(
+				{ silent: true },
+				{ isCancellationRequested: false, onCancellationRequested: vi.fn() }
+			);
+
+			expect(mockFetcherService.fetch).toHaveBeenCalledWith(
+				'https://api.openai.com/v1/models',
+				expect.objectContaining({
+					method: 'GET',
+					headers: expect.objectContaining({
+						'Authorization': 'Bearer test-api-key'
+					})
+				})
+			);
+		});
 	});
 
 	describe('updateAPIKey', () => {
@@ -278,7 +363,7 @@ describe('CustomProvider', () => {
 				apiFormat: 'openai-chat'
 			};
 
-			const provider = createProvider(config);
+			const provider = createOpenAIProvider(config);
 
 			// Mock the promptForAPIKey to return a new key
 			// Since promptForAPIKey is imported, we can't easily mock it

@@ -21,7 +21,6 @@ import { CustomOAIModelConfigurator } from './customOAIModelConfigurator';
 import { CustomOAIBYOKModelProvider } from './customOAIProvider';
 import { CustomProviderAggregator } from './customProviderAggregator';
 import { CustomProviderConfigurator } from './customProviderConfigurator';
-import { CustomizeMenuProvider } from './customizeProvider';
 import { GeminiNativeBYOKLMProvider } from './geminiNativeProvider';
 import { OllamaLMProvider } from './ollamaProvider';
 import { OAIBYOKLMProvider } from './openAIProvider';
@@ -121,13 +120,10 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 			if (result?.selectModel && result.providerId && this._customProviderAggregator) {
 				const provider = this._customProviderAggregator.getProvider(result.providerId);
 				if (provider) {
-					// Trigger model refresh and let VS Code show available models
 					await this._showModelsForProvider(result.providerId, provider);
 				}
 			}
 		}));
-
-		this._authChange(authService, this._instantiationService);
 
 		this._register(authService.onDidAuthenticationChange(() => {
 			this._authChange(authService, this._instantiationService);
@@ -148,23 +144,16 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 			this._providers.set(AzureBYOKModelProvider.providerName.toLowerCase(), instantiationService.createInstance(AzureBYOKModelProvider, this._byokStorageService));
 			this._providers.set(CustomOAIBYOKModelProvider.providerName.toLowerCase(), instantiationService.createInstance(CustomOAIBYOKModelProvider, this._byokStorageService));
 
-			// Register the "Customize..." menu provider
-			const customizeProvider = instantiationService.createInstance(CustomizeMenuProvider, this._byokStorageService);
-			customizeProvider.setAddProviderCallback((providerId, config) => {
-				this._registerCustomProvider(providerId, config);
-			});
-			this._providers.set(CustomizeMenuProvider.providerName.toLowerCase(), customizeProvider);
+			// Create the Custom Providers aggregator for the 'custom' vendor
+			this._customProviderAggregator = instantiationService.createInstance(
+				CustomProviderAggregator,
+				this._byokStorageService
+			);
+			this._providers.set('custom', this._customProviderAggregator);
 
 			for (const [providerName, provider] of this._providers) {
 				this._store.add(lm.registerLanguageModelChatProvider(providerName, provider));
 			}
-
-			// Create and register the custom provider aggregator
-			this._customProviderAggregator = this._instantiationService.createInstance(
-				CustomProviderAggregator,
-				this._byokStorageService
-			);
-			this._store.add(lm.registerLanguageModelChatProvider('custom', this._customProviderAggregator));
 
 			// Register custom providers from configuration into the aggregator
 			this._registerCustomProvidersFromConfig();
@@ -175,21 +164,19 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 	 * Register a single custom provider into the aggregator
 	 */
 	private _registerCustomProvider(providerId: string, config: CustomProviderConfig): void {
-		if (!this._customProviderAggregator) {
-			this._logService.warn(`BYOK: Custom provider aggregator not initialized yet`);
-			return;
-		}
-
 		// Check if already registered
-		if (this._customProviderAggregator.hasProvider(providerId)) {
+		if (this._customProviderAggregator?.hasProvider(providerId)) {
 			this._logService.warn(`BYOK: Custom provider '${providerId}' is already registered`);
 			return;
 		}
 
-		this._customProviderAggregator.addProvider(providerId, config);
-		this._providers.set(providerId, this._customProviderAggregator.getProvider(providerId)!);
-
-		this._logService.info(`BYOK: Registered custom provider '${config.name}' (${providerId})`);
+		// Add to the aggregator which will create the appropriate provider
+		if (this._customProviderAggregator) {
+			this._customProviderAggregator.addProvider(providerId, config);
+			this._logService.info(`BYOK: Registered custom provider '${config.name}' (${providerId}) into aggregator`);
+		} else {
+			this._logService.warn(`BYOK: Cannot register custom provider '${providerId}' - aggregator not initialized`);
+		}
 	}
 
 	/**
@@ -208,6 +195,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 	 */
 	private _refreshCustomProviders(): void {
 		if (!this._customProviderAggregator) {
+			this._logService.warn('BYOK: Cannot refresh custom providers - aggregator not initialized');
 			return;
 		}
 
@@ -219,19 +207,24 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		for (const providerId of existingProviderIds) {
 			if (!currentProviderIds.has(providerId)) {
 				this._customProviderAggregator.removeProvider(providerId);
-				this._providers.delete(providerId);
-				this._logService.info(`BYOK: Unregistered custom provider '${providerId}'`);
+				this._logService.info(`BYOK: Removed custom provider '${providerId}' from aggregator`);
 			}
 		}
 
-		// Register new providers
+		// Register new providers or refresh existing ones
 		for (const [providerId, config] of Object.entries(customProviders)) {
 			if (!this._customProviderAggregator.hasProvider(providerId)) {
 				this._registerCustomProvider(providerId, config);
+			} else {
+				// Trigger model refresh for existing providers
+				const provider = this._customProviderAggregator.getProvider(providerId);
+				if (provider) {
+					provider.fireModelChange();
+				}
 			}
 		}
 
-		// Trigger model refresh
+		// Trigger aggregator to update its model list
 		this._customProviderAggregator.fireModelChange();
 	}
 

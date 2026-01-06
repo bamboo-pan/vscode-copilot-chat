@@ -6,18 +6,23 @@ import type { Content, FunctionCall, FunctionResponse, Part } from '@google/gena
 import { Raw } from '@vscode/prompt-tsx';
 import type { LanguageModelChatMessage } from 'vscode';
 import { CustomDataPartMimeTypes } from '../../../platform/endpoint/common/endpointTypes';
-import { LanguageModelChatMessageRole, LanguageModelDataPart, LanguageModelTextPart, LanguageModelToolCallPart, LanguageModelToolResultPart, LanguageModelToolResultPart2 } from '../../../vscodeTypes';
+import { LanguageModelChatMessageRole, LanguageModelDataPart, LanguageModelTextPart, LanguageModelThinkingPart, LanguageModelToolCallPart, LanguageModelToolResultPart, LanguageModelToolResultPart2 } from '../../../vscodeTypes';
 
-function apiContentToGeminiContent(content: (LanguageModelTextPart | LanguageModelToolResultPart | LanguageModelToolCallPart | LanguageModelDataPart)[]): Part[] {
+function apiContentToGeminiContent(content: (LanguageModelTextPart | LanguageModelToolResultPart | LanguageModelToolCallPart | LanguageModelDataPart | LanguageModelThinkingPart)[]): Part[] {
+	const thinkingParts: Part[] = [];  // Thinking must come first for Claude proxy scenarios
 	const convertedContent: Part[] = [];
 	for (const part of content) {
 		if (part instanceof LanguageModelToolCallPart) {
-			convertedContent.push({
-				functionCall: {
-					name: part.name,
-					args: part.input as Record<string, unknown> || {}
-				}
-			});
+			// Include callId for backends that require it (e.g., cloudcode routing to Claude/GPT)
+			// Native Gemini ignores unknown fields, but proxies may use them
+			const functionCall: FunctionCall & { id?: string } = {
+				name: part.name,
+				args: part.input as Record<string, unknown> || {}
+			};
+			if (part.callId) {
+				functionCall.id = part.callId;
+			}
+			convertedContent.push({ functionCall });
 		} else if (part instanceof LanguageModelDataPart) {
 			if (part.mimeType !== CustomDataPartMimeTypes.StatefulMarker && part.mimeType !== CustomDataPartMimeTypes.CacheControl) {
 				convertedContent.push({
@@ -82,13 +87,42 @@ function apiContentToGeminiContent(content: (LanguageModelTextPart | LanguageMod
 				};
 			}
 
-			const functionResponse: FunctionResponse = {
+			const functionResponse: FunctionResponse & { id?: string } = {
 				name: functionName,
 				response: responsePayload
 			};
+			// Include the full callId for backends that require it (e.g., cloudcode routing to Claude/GPT)
+			if (part.callId) {
+				functionResponse.id = part.callId;
+			}
 
 			convertedContent.push({ functionResponse });
-		} else {
+		} else if (part instanceof LanguageModelThinkingPart) {
+			// Handle thinking blocks - preserve for Claude multi-turn conversations
+			// When thinking is enabled, Claude requires assistant messages to start with thinking blocks
+			const thinkingPart: Part & { thought?: boolean; thinking?: string; signature?: string; redactedData?: string } = {};
+
+			// Check for redacted thinking
+			if (part.metadata?.redactedData) {
+				thinkingPart.thought = true;
+				thinkingPart.redactedData = part.metadata.redactedData;
+			} else {
+				// Regular thinking - use the complete thinking text or the value
+				const thinkingText = part.metadata?._completeThinking || (Array.isArray(part.value) ? part.value.join('') : part.value);
+				if (thinkingText) {
+					thinkingPart.thought = true;
+					thinkingPart.text = thinkingText;
+					if (part.metadata?.signature) {
+						thinkingPart.signature = part.metadata.signature;
+					}
+				}
+			}
+
+			// Only add if we have thinking content - add to thinkingParts array
+			if (thinkingPart.thought) {
+				thinkingParts.push(thinkingPart);
+			}
+		} else if (part instanceof LanguageModelTextPart) {
 			// Text content - only filter completely empty strings, keep whitespace
 			if (part.value !== '') {
 				convertedContent.push({
@@ -97,7 +131,8 @@ function apiContentToGeminiContent(content: (LanguageModelTextPart | LanguageMod
 			}
 		}
 	}
-	return convertedContent;
+	// Return thinking parts first, then other content (Claude proxy compatibility)
+	return [...thinkingParts, ...convertedContent];
 }
 
 export function apiMessageToGeminiMessage(messages: LanguageModelChatMessage[]): { contents: Content[]; systemInstruction?: Content } {

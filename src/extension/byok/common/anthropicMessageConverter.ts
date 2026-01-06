@@ -9,27 +9,58 @@ import { CustomDataPartMimeTypes } from '../../../platform/endpoint/common/endpo
 import { isDefined } from '../../../util/vs/base/common/types';
 import { LanguageModelChatMessageRole, LanguageModelDataPart, LanguageModelTextPart, LanguageModelThinkingPart, LanguageModelToolCallPart, LanguageModelToolResultPart, LanguageModelToolResultPart2 } from '../../../vscodeTypes';
 
-function apiContentToAnthropicContent(content: (LanguageModelTextPart | LanguageModelToolResultPart | LanguageModelToolCallPart | LanguageModelDataPart | LanguageModelThinkingPart)[]): ContentBlockParam[] {
+/**
+ * Options for converting API content to Anthropic format
+ */
+interface ContentConversionOptions {
+	/** Whether this is an assistant message (affects thinking block handling) */
+	isAssistant?: boolean;
+	/** Whether extended thinking is enabled for this request */
+	thinkingEnabled?: boolean;
+}
+
+/**
+ * Helper to check if a part is a ThinkingPart (handles cross-module instanceof issues)
+ */
+function isThinkingPart(part: any): part is LanguageModelThinkingPart {
+	return part instanceof LanguageModelThinkingPart ||
+		(part && typeof part === 'object' && part.constructor?.name === 'LanguageModelThinkingPart') ||
+		(part && typeof part === 'object' && 'value' in part && 'metadata' in part && part.metadata !== undefined);
+}
+
+/**
+ * Helper to check if a part is a ToolCallPart (handles cross-module instanceof issues)
+ */
+function isToolCallPart(part: any): part is LanguageModelToolCallPart {
+	return part instanceof LanguageModelToolCallPart ||
+		(part && typeof part === 'object' && part.constructor?.name === 'LanguageModelToolCallPart') ||
+		(part && typeof part === 'object' && 'callId' in part && 'name' in part && 'input' in part);
+}
+
+function apiContentToAnthropicContent(content: (LanguageModelTextPart | LanguageModelToolResultPart | LanguageModelToolCallPart | LanguageModelDataPart | LanguageModelThinkingPart)[], options?: ContentConversionOptions): ContentBlockParam[] {
+	const thinkingBlocks: ContentBlockParam[] = [];  // Thinking must come first for Claude
 	const convertedContent: ContentBlockParam[] = [];
+	let hasToolUse = false;
 
 	for (const part of content) {
-		if (part instanceof LanguageModelThinkingPart) {
+		if (isThinkingPart(part)) {
 			// Check if this is a redacted thinking block
 			if (part.metadata?.redactedData) {
-				convertedContent.push({
+				thinkingBlocks.push({
 					type: 'redacted_thinking',
 					data: part.metadata.redactedData,
 				});
 			} else if (part.metadata?._completeThinking) {
 				// Only push thinking block when we have the complete thinking marker
-				convertedContent.push({
+				thinkingBlocks.push({
 					type: 'thinking',
 					thinking: part.metadata._completeThinking,
 					signature: part.metadata.signature || '',
 				});
 			}
 			// Skip incremental thinking parts - we only care about the complete one
-		} else if (part instanceof LanguageModelToolCallPart) {
+		} else if (isToolCallPart(part)) {
+			hasToolUse = true;
 			convertedContent.push({
 				type: 'tool_use',
 				id: part.callId,
@@ -85,10 +116,33 @@ function apiContentToAnthropicContent(content: (LanguageModelTextPart | Language
 			});
 		}
 	}
-	return convertedContent;
+
+	// When extended thinking is enabled and this is an assistant message with tool_use
+	// but no thinking blocks, we must inject a placeholder redacted_thinking block.
+	// Claude API requires assistant messages to start with thinking blocks when thinking is enabled.
+	// This handles the case where context summarization has stripped thinking blocks.
+	if (options?.thinkingEnabled && options?.isAssistant && hasToolUse && thinkingBlocks.length === 0) {
+		// Insert a minimal redacted_thinking block as a placeholder
+		// This satisfies Claude's requirement without fabricating thinking content
+		thinkingBlocks.push({
+			type: 'redacted_thinking',
+			data: '',  // Empty data for placeholder
+		});
+	}
+
+	// Return thinking blocks first, then other content (Claude requirement)
+	return [...thinkingBlocks, ...convertedContent];
 }
 
-export function apiMessageToAnthropicMessage(messages: LanguageModelChatMessage[]): { messages: MessageParam[]; system: TextBlockParam } {
+/**
+ * Options for converting API messages to Anthropic format
+ */
+export interface AnthropicMessageConversionOptions {
+	/** Whether extended thinking is enabled for this request */
+	thinkingEnabled?: boolean;
+}
+
+export function apiMessageToAnthropicMessage(messages: LanguageModelChatMessage[], options?: AnthropicMessageConversionOptions): { messages: MessageParam[]; system: TextBlockParam } {
 	const unmergedMessages: MessageParam[] = [];
 	const systemMessage: TextBlockParam = {
 		type: 'text',
@@ -98,7 +152,10 @@ export function apiMessageToAnthropicMessage(messages: LanguageModelChatMessage[
 		if (message.role === LanguageModelChatMessageRole.Assistant) {
 			unmergedMessages.push({
 				role: 'assistant',
-				content: apiContentToAnthropicContent(message.content),
+				content: apiContentToAnthropicContent(message.content, {
+					isAssistant: true,
+					thinkingEnabled: options?.thinkingEnabled
+				}),
 			});
 		} else if (message.role === LanguageModelChatMessageRole.User) {
 			unmergedMessages.push({

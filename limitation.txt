@@ -1,0 +1,24 @@
+
+claude code格式:
+claude,gemini,gpt模型，tool use,thinking,多轮对话均能工作
+
+gemini格式:
+gpt模型报错,
+Sorry, no response was returned.
+claude模型报错,
+Sorry, your request failed. Please try again.
+Copilot Request id: f5d36e6b-38e8-4e35-9c2f-af49cb63cd44
+Reason: {"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.type: Expected thinking or redacted_thinking, but found text. When thinking is enabled, a final assistant message must start with a thinking block (preceeding the lastmost set of tool_use and tool_result blocks). We recommend you include thinking blocks from previous turns. To avoid this requirement, disable thinking. Please consult our documentation at https://docs.claude.com/en/docs/build-with-claude/extended-thinking"},"request_id":"req_vrtx_011CWpLGjkhgyHduHcHQTXgK"}: Error: {"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.type: Expected thinking or redacted_thinking, but found text. When thinking is enabled, a final assistant message must start with a thinking block (preceeding the lastmost set of tool_use and tool_result blocks). We recommend you include thinking blocks from previous turns. To avoid this requirement, disable thinking. Please consult our documentation at https://docs.claude.com/en/docs/build-with-claude/extended-thinking"},"request_id":"req_vrtx_011CWpLGjkhgyHduHcHQTXgK"} at CustomProvider._handleGeminiRequest (c:\Users\bamboo.vscode\extensions\github.copilot-chat-0.36.0\dist\extension.js:180948:15) at processTicksAndRejections (node:internal/process/task_queues:105:5)
+gemini模型thingking没有细节,tool use,多轮对话均能工作
+
+openai response格式：
+claude模型报错,
+Sorry, your request failed. Please try again.
+Copilot Request id: ab725231-72c1-4c2c-a834-6fa2247441ab
+Reason: {"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.tool_use.id: Field required"},"request_id":"req_vrtx_011CWpLxP7LrED87AGkH4jEG"}: Error: {"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.tool_use.id: Field required"},"request_id":"req_vrtx_011CWpLxP7LrED87AGkH4jEG"} at CustomProvider._handleOpenAIResponsesRequest (c:\Users\bamboo.vscode\extensions\github.copilot-chat-0.36.0\dist\extension.js:181086:15) at processTicksAndRejections (node:internal/process/task_queues:105:5)
+gemini模型thingking没有细节,tool use,多轮对话均能工作
+gpt模型报错,
+Sorry, your request failed. Please try again.
+Copilot Request id: c3495685-d5b5-458f-a254-37264db2492a
+Reason: Expected the 'id' of a(n) 'assistant' 'tool_calls' array element to be populated.: Error: Expected the 'id' of a(n) 'assistant' 'tool_calls' array element to be populated. at CustomProvider._handleOpenAIResponsesRequest (c:\Users\bamboo.vscode\extensions\github.copilot-chat-0.36.0\dist\extension.js:181086:15) at processTicksAndRejections (node:internal/process/task_queues:105:5)
+

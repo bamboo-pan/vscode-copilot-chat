@@ -13,15 +13,18 @@ const removeIgnoredFiles = async (files) => {
 		})
 	);
 	const filteredFiles = files.filter((_, i) => !isIgnored[i]);
-	return filteredFiles.join(' ');
+	return filteredFiles;
 };
 
 module.exports = {
 	'!({.esbuild.ts,test/simulation/fixtures/**,test/scenarios/**,.vscode/extensions/**,**/vscode.proposed.*})*{.ts,.js,.tsx}': async (files) => {
 		const filesToLint = await removeIgnoredFiles(files);
+		if (filesToLint.length === 0) {
+			return [];
+		}
 		return [
-			`npm run tsfmt -- ${filesToLint}`,
-			`npx tsx node_modules/eslint/bin/eslint.js --max-warnings=0 --no-warn-ignored ${filesToLint}`
+			`npm run tsfmt -- ${filesToLint.join(' ')}`,
+			`npx tsx node_modules/eslint/bin/eslint.js --max-warnings=0 --no-warn-ignored ${filesToLint.join(' ')}`
 		];
 	},
 };

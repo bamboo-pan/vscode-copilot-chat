@@ -59,6 +59,11 @@ Your code is yours. We follow responsible practices in accordance with our [Priv
 
 To get the latest security fixes, please use the latest version of the Copilot extension and VS Code.
 
+## Documentation
+
+- [Build and Configuration Guide](BUILD_AND_CONFIG.md): Detailed instructions on how to compile, package, and configure custom models.
+- [GitHub Copilot Trust Center](https://resources.github.com/copilot-trust-center)
+
 ### Resources & next steps
 * **Sign up for [GitHub Copilot Free](https://github.com/settings/copilot?utm_source=vscode-chat-readme&utm_medium=third&utm_campaign=2025mar-em-MSFT-signup)**
     * If you're using Copilot for your business, check out [Copilot Business](https://docs.github.com/en/copilot/copilot-business/about-github-copilot-business) and [Copilot Enterprise](https://docs.github.com/en/copilot/github-copilot-enterprise/overview/about-github-copilot-enterprise)
