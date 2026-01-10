@@ -40,8 +40,11 @@
 2. 安装依赖：
    ```bash
    npm install
+   
+   编译问题已修复！问题原因是缺少依赖包 @parcel/watcher，因为 node_modules 没有正确安装。npm install 失败是因为 Playwright 下载浏览器时出现协议错误，所以使用了 npm install --ignore-scripts 来跳过 postinstall 脚本，成功安装了依赖。现在 npm run compile 可以正常运行，构建成功生成了所有输出文件。
+   如果是 Playwright，可以手动运行 npx playwright install 来下载浏览器
    ```
-
+   
 3. 运行编译命令：
    ```bash
    npm run compile
