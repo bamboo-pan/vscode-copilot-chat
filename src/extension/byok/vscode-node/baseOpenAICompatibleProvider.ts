@@ -20,10 +20,10 @@ export abstract class BaseOpenAICompatibleLMProvider implements BYOKModelProvide
 	protected _apiKey: string | undefined;
 	constructor(
 		public readonly authType: BYOKAuthType,
-		private readonly _name: string,
-		protected readonly _baseUrl: string,
+		protected readonly _name: string,
+		private readonly _defaultBaseUrl: string,
 		protected _knownModels: BYOKKnownModels | undefined,
-		private readonly _byokStorageService: IBYOKStorageService,
+		protected readonly _byokStorageService: IBYOKStorageService,
 		@IFetcherService protected readonly _fetcherService: IFetcherService,
 		@ILogService protected readonly _logService: ILogService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
@@ -31,13 +31,71 @@ export abstract class BaseOpenAICompatibleLMProvider implements BYOKModelProvide
 		this._lmWrapper = this._instantiationService.createInstance(CopilotLanguageModelWrapper);
 	}
 
+	/**
+	 * Get the effective base URL. Subclasses can override this to support custom URLs.
+	 */
+	protected getBaseUrl(): string {
+		return this._defaultBaseUrl;
+	}
+
 	protected async getModelInfo(modelId: string, apiKey: string | undefined, modelCapabilities?: BYOKModelCapabilities): Promise<IChatModelInformation> {
 		return resolveModelInfo(modelId, this._name, this._knownModels, modelCapabilities);
 	}
 
+	/**
+	 * Infer model capabilities based on model ID patterns for unknown models.
+	 * This provides reasonable defaults when the model is not in the known models list.
+	 */
+	protected _inferModelCapabilities(modelId: string): BYOKModelCapabilities {
+		const normalized = modelId.toLowerCase();
+
+		// Determine if the model supports vision
+		const supportsVision = normalized.includes('vision') ||
+			normalized.includes('gpt-4o') ||
+			normalized.includes('gpt-4-turbo') ||
+			normalized.includes('o1') ||
+			normalized.includes('o3') ||
+			normalized.includes('o4');
+
+		// Determine if the model supports extended thinking
+		const supportsThinking = normalized.includes('o1') ||
+			normalized.includes('o3') ||
+			normalized.includes('o4');
+
+		// Infer token limits based on model series
+		let maxInputTokens = 128000;
+		let maxOutputTokens = 16384;
+
+		if (normalized.includes('gpt-4o')) {
+			maxInputTokens = 128000;
+			maxOutputTokens = 16384;
+		} else if (normalized.includes('gpt-4-turbo')) {
+			maxInputTokens = 128000;
+			maxOutputTokens = 4096;
+		} else if (normalized.includes('gpt-4')) {
+			maxInputTokens = 8192;
+			maxOutputTokens = 8192;
+		} else if (normalized.includes('gpt-3.5')) {
+			maxInputTokens = 16385;
+			maxOutputTokens = 4096;
+		} else if (normalized.includes('o1') || normalized.includes('o3') || normalized.includes('o4')) {
+			maxInputTokens = 200000;
+			maxOutputTokens = 100000;
+		}
+
+		return {
+			maxInputTokens,
+			maxOutputTokens,
+			name: modelId,
+			toolCalling: true,
+			vision: supportsVision,
+			thinking: supportsThinking
+		};
+	}
+
 	protected async getAllModels(): Promise<BYOKKnownModels> {
 		try {
-			const response = await this._fetcherService.fetch(`${this._baseUrl}/models`, {
+			const response = await this._fetcherService.fetch(`${this.getBaseUrl()}/models`, {
 				method: 'GET',
 				headers: {
 					'Authorization': `Bearer ${this._apiKey}`,
@@ -54,9 +112,12 @@ export abstract class BaseOpenAICompatibleLMProvider implements BYOKModelProvide
 			for (const model of models.data) {
 				if (this._knownModels && this._knownModels[model.id]) {
 					modelList[model.id] = this._knownModels[model.id];
+				} else {
+					// Infer capabilities for models we don't know
+					modelList[model.id] = this._inferModelCapabilities(model.id);
 				}
 			}
-			this._logService.trace(`Filtered to ${Object.keys(modelList).length} known models for ${this._name}`);
+			this._logService.trace(`Processed ${Object.keys(modelList).length} models for ${this._name}`);
 			return modelList;
 		} catch (error) {
 			throw new Error(error.message ? error.message : error);
@@ -102,9 +163,10 @@ export abstract class BaseOpenAICompatibleLMProvider implements BYOKModelProvide
 
 	private async getEndpointImpl(model: LanguageModelChatInformation): Promise<OpenAIEndpoint> {
 		const modelInfo: IChatModelInformation = await this.getModelInfo(model.id, this._apiKey);
+		const baseUrl = this.getBaseUrl();
 		const url = modelInfo.supported_endpoints?.includes(ModelSupportedEndpoint.Responses) ?
-			`${this._baseUrl}/responses` :
-			`${this._baseUrl}/chat/completions`;
+			`${baseUrl}/responses` :
+			`${baseUrl}/chat/completions`;
 		return this._instantiationService.createInstance(OpenAIEndpoint, modelInfo, this._apiKey ?? '', url);
 	}
 

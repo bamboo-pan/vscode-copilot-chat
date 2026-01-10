@@ -6,6 +6,7 @@
 import { GenerateContentParameters, GoogleGenAI, Tool, Type } from '@google/genai';
 import { CancellationToken, LanguageModelChatInformation, LanguageModelChatMessage, LanguageModelChatMessage2, LanguageModelResponsePart2, LanguageModelTextPart, LanguageModelThinkingPart, LanguageModelToolCallPart, Progress, ProvideLanguageModelChatResponseOptions } from 'vscode';
 import { ChatFetchResponseType, ChatLocation } from '../../../platform/chat/common/commonTypes';
+import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { ILogService } from '../../../platform/log/common/logService';
 import { IResponseDelta, OpenAiFunctionTool } from '../../../platform/networking/common/fetch';
 import { APIUsage } from '../../../platform/networking/common/openai';
@@ -13,25 +14,49 @@ import { IRequestLogger } from '../../../platform/requestLogger/node/requestLogg
 import { toErrorMessage } from '../../../util/common/errorMessage';
 import { RecordedProgress } from '../../../util/common/progressRecorder';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
-import { BYOKAuthType, BYOKKnownModels, byokKnownModelsToAPIInfo, BYOKModelCapabilities, BYOKModelProvider, handleAPIKeyUpdate, LMResponsePart } from '../common/byokProvider';
+import { BYOKAuthType, BYOKKnownModels, byokKnownModelsToAPIInfo, BYOKModelCapabilities, BYOKModelProvider, LMResponsePart } from '../common/byokProvider';
 import { toGeminiFunction as toGeminiFunctionDeclaration, ToolJsonSchema } from '../common/geminiFunctionDeclarationConverter';
 import { apiMessageToGeminiMessage, geminiMessagesToRawMessagesForLogging } from '../common/geminiMessageConverter';
 import { IBYOKStorageService } from './byokStorageService';
-import { promptForAPIKey } from './byokUIService';
+import { BYOK_OFFICIAL_URLS, configureBYOKProviderWithCustomUrl, showConfigurationMenu } from './byokUIService';
 
 export class GeminiNativeBYOKLMProvider implements BYOKModelProvider<LanguageModelChatInformation> {
 	public static readonly providerName = 'Gemini';
+	public static readonly officialBaseUrl = BYOK_OFFICIAL_URLS.Gemini;
 	public readonly authType: BYOKAuthType = BYOKAuthType.GlobalApiKey;
 	private _genAIClient: GoogleGenAI | undefined;
 	private _genAIClientApiKey: string | undefined;
+	private _genAIClientBaseUrl: string | undefined;
 	private _apiKey: string | undefined;
+	private _isCustomUrl: boolean = false;
 
 	constructor(
 		private readonly _knownModels: BYOKKnownModels | undefined,
 		private readonly _byokStorageService: IBYOKStorageService,
 		@ILogService private readonly _logService: ILogService,
-		@IRequestLogger private readonly _requestLogger: IRequestLogger
+		@IRequestLogger private readonly _requestLogger: IRequestLogger,
+		@IConfigurationService private readonly _configurationService: IConfigurationService
 	) { }
+
+	/**
+	 * Get the base URL from configuration or use official URL
+	 */
+	private _getBaseUrl(): string {
+		const customUrl = this._configurationService.getConfig(ConfigKey.BYOKGoogleBaseUrl);
+		if (customUrl && customUrl.trim()) {
+			this._isCustomUrl = true;
+			return customUrl.trim().replace(/\/+$/, ''); // Normalize by removing trailing slashes
+		}
+		this._isCustomUrl = false;
+		return GeminiNativeBYOKLMProvider.officialBaseUrl;
+	}
+
+	/**
+	 * Check if using a custom URL
+	 */
+	public isUsingCustomUrl(): boolean {
+		return this._isCustomUrl;
+	}
 
 	private _isInvalidApiKeyError(error: unknown): boolean {
 		if (!error) {
@@ -49,17 +74,79 @@ export class GeminiNativeBYOKLMProvider implements BYOKModelProvider<LanguageMod
 
 	private async _getOrReadApiKey(): Promise<string | undefined> {
 		if (!this._apiKey) {
-			this._apiKey = await this._byokStorageService.getAPIKey(GeminiNativeBYOKLMProvider.providerName);
+			this._apiKey = await this._byokStorageService.getAPIKey(GeminiNativeBYOKLMProvider.providerName, undefined, this._isCustomUrl);
 		}
 		return this._apiKey;
 	}
 
 	private _ensureClient(apiKey: string): GoogleGenAI {
-		if (!this._genAIClient || this._genAIClientApiKey !== apiKey) {
-			this._genAIClient = new GoogleGenAI({ apiKey });
+		const baseUrl = this._getBaseUrl();
+		if (!this._genAIClient || this._genAIClientApiKey !== apiKey || this._genAIClientBaseUrl !== baseUrl) {
+			// Create client with custom base URL if configured
+			if (this._isCustomUrl) {
+				this._genAIClient = new GoogleGenAI({
+					apiKey,
+					httpOptions: {
+						baseUrl: baseUrl
+					}
+				});
+			} else {
+				this._genAIClient = new GoogleGenAI({ apiKey });
+			}
 			this._genAIClientApiKey = apiKey;
+			this._genAIClientBaseUrl = baseUrl;
 		}
 		return this._genAIClient;
+	}
+
+	/**
+	 * Infer model capabilities based on model ID patterns for unknown models.
+	 * This provides reasonable defaults when the model is not in the known models list.
+	 */
+	private _inferModelCapabilities(modelId: string, displayName: string | undefined): BYOKModelCapabilities {
+		const normalized = modelId.toLowerCase();
+
+		// Determine if the model supports vision (most Gemini models support vision)
+		const supportsVision = normalized.includes('gemini-1.5') ||
+			normalized.includes('gemini-2') ||
+			normalized.includes('gemini-pro-vision') ||
+			normalized.includes('gemini-flash');
+
+		// Determine if the model supports extended thinking
+		// Gemini 2.0+ models with "thinking" or flash series support thinking
+		const supportsThinking = normalized.includes('thinking') ||
+			normalized.includes('gemini-2') ||
+			normalized.includes('gemini-exp');
+
+		// Infer token limits based on model series
+		let maxInputTokens = 1000000; // Gemini models typically have large context windows
+		let maxOutputTokens = 8192;
+
+		if (normalized.includes('gemini-1.5-pro')) {
+			maxInputTokens = 2000000;
+			maxOutputTokens = 8192;
+		} else if (normalized.includes('gemini-1.5-flash')) {
+			maxInputTokens = 1000000;
+			maxOutputTokens = 8192;
+		} else if (normalized.includes('gemini-2')) {
+			maxInputTokens = 1000000;
+			maxOutputTokens = 8192;
+		} else if (normalized.includes('gemini-pro')) {
+			maxInputTokens = 32000;
+			maxOutputTokens = 2048;
+		}
+
+		// Use display name if available, otherwise extract a readable name from model ID
+		const name = displayName && displayName.trim() ? displayName : modelId.replace('models/', '');
+
+		return {
+			maxInputTokens,
+			maxOutputTokens,
+			name,
+			toolCalling: true,
+			vision: supportsVision,
+			thinking: supportsThinking
+		};
 	}
 
 	private async getAllModels(apiKey: string): Promise<BYOKKnownModels> {
@@ -74,9 +161,11 @@ export class GeminiNativeBYOKLMProvider implements BYOKModelProvider<LanguageMod
 					continue; // Skip models without names
 				}
 
-				// Enable only known models.
 				if (this._knownModels && this._knownModels[modelId]) {
 					modelList[modelId] = this._knownModels[modelId];
+				} else {
+					// Infer capabilities for models we don't know
+					modelList[modelId] = this._inferModelCapabilities(modelId, model.displayName);
 				}
 			}
 			return modelList;
@@ -87,36 +176,108 @@ export class GeminiNativeBYOKLMProvider implements BYOKModelProvider<LanguageMod
 	}
 
 	async updateAPIKey(): Promise<void> {
-		const result = await handleAPIKeyUpdate(GeminiNativeBYOKLMProvider.providerName, this._byokStorageService, promptForAPIKey);
+		const currentBaseUrl = this._getBaseUrl();
+		const hasExistingConfig = await this._byokStorageService.getAPIKey(GeminiNativeBYOKLMProvider.providerName, undefined, this._isCustomUrl) !== undefined;
+
+		if (hasExistingConfig) {
+			const action = await showConfigurationMenu(GeminiNativeBYOKLMProvider.providerName, currentBaseUrl);
+			if (!action) {
+				return;
+			}
+
+			if (action === 'view') {
+				return;
+			} else if (action === 'reset') {
+				await this._configurationService.setConfig(ConfigKey.BYOKGoogleBaseUrl, '');
+				await this._byokStorageService.deleteAPIKey(GeminiNativeBYOKLMProvider.providerName, this.authType, undefined, true);
+				this._apiKey = undefined;
+				this._genAIClient = undefined;
+				this._genAIClientApiKey = undefined;
+				this._genAIClientBaseUrl = undefined;
+				this._isCustomUrl = false;
+				return;
+			}
+		}
+
+		const result = await configureBYOKProviderWithCustomUrl(
+			GeminiNativeBYOKLMProvider.providerName,
+			currentBaseUrl !== GeminiNativeBYOKLMProvider.officialBaseUrl ? currentBaseUrl : undefined,
+			async (baseUrl, apiKey) => {
+				try {
+					let testClient: GoogleGenAI;
+					if (baseUrl !== GeminiNativeBYOKLMProvider.officialBaseUrl) {
+						testClient = new GoogleGenAI({
+							apiKey,
+							httpOptions: { baseUrl }
+						});
+					} else {
+						testClient = new GoogleGenAI({ apiKey });
+					}
+					const models = await testClient.models.list();
+					let count = 0;
+					for await (const _ of models) {
+						count++;
+					}
+					return { success: true, modelCount: count };
+				} catch (error) {
+					return { success: false, error: error instanceof Error ? error.message : String(error) };
+				}
+			}
+		);
+
 		if (result.cancelled) {
 			return;
 		}
 
-		this._apiKey = result.apiKey;
-		if (this._apiKey) {
-			this._ensureClient(this._apiKey);
+		if (result.baseUrl && result.baseUrl !== GeminiNativeBYOKLMProvider.officialBaseUrl) {
+			await this._configurationService.setConfig(ConfigKey.BYOKGoogleBaseUrl, result.baseUrl);
 		} else {
-			this._genAIClient = undefined;
-			this._genAIClientApiKey = undefined;
+			await this._configurationService.setConfig(ConfigKey.BYOKGoogleBaseUrl, '');
 		}
+
+		if (result.apiKey) {
+			this._apiKey = result.apiKey;
+			await this._byokStorageService.storeAPIKey(
+				GeminiNativeBYOKLMProvider.providerName,
+				result.apiKey,
+				this.authType,
+				undefined,
+				result.isCustomUrl
+			);
+		}
+
+		this._genAIClient = undefined;
+		this._genAIClientApiKey = undefined;
+		this._genAIClientBaseUrl = undefined;
 	}
 
 	async provideLanguageModelChatInformation(options: { silent: boolean }, token: CancellationToken): Promise<LanguageModelChatInformation[]> {
+		// Update base URL check
+		this._getBaseUrl();
+
 		if (!this._apiKey) { // If we don't have the API key it might just be in storage, so we try to read it first
-			const storedKey = await this._byokStorageService.getAPIKey(GeminiNativeBYOKLMProvider.providerName);
+			const storedKey = await this._byokStorageService.getAPIKey(GeminiNativeBYOKLMProvider.providerName, undefined, this._isCustomUrl);
 			// Normalize empty strings to undefined - the || undefined ensures that if trim() returns an empty string,
 			// we store undefined instead, so subsequent if (this._apiKey) checks treat it as "no key"
 			this._apiKey = storedKey?.trim() || undefined;
 		}
 		try {
 			if (this._apiKey) {
-				return byokKnownModelsToAPIInfo(GeminiNativeBYOKLMProvider.providerName, await this.getAllModels(this._apiKey));
+				const models = await this.getAllModels(this._apiKey);
+				return byokKnownModelsToAPIInfo(
+					this._isCustomUrl ? `${GeminiNativeBYOKLMProvider.providerName} (Custom)` : GeminiNativeBYOKLMProvider.providerName,
+					models
+				);
 			} else if (options.silent && !this._apiKey) {
 				return [];
 			} else { // Not silent, and no api key = good to prompt user for api key
 				await this.updateAPIKey();
 				if (this._apiKey) {
-					return byokKnownModelsToAPIInfo(GeminiNativeBYOKLMProvider.providerName, await this.getAllModels(this._apiKey));
+					const models = await this.getAllModels(this._apiKey);
+					return byokKnownModelsToAPIInfo(
+						this._isCustomUrl ? `${GeminiNativeBYOKLMProvider.providerName} (Custom)` : GeminiNativeBYOKLMProvider.providerName,
+						models
+					);
 				} else {
 					return [];
 				}
@@ -129,7 +290,11 @@ export class GeminiNativeBYOKLMProvider implements BYOKModelProvider<LanguageMod
 				await this.updateAPIKey();
 				if (this._apiKey) {
 					try {
-						return byokKnownModelsToAPIInfo(GeminiNativeBYOKLMProvider.providerName, await this.getAllModels(this._apiKey));
+						const models = await this.getAllModels(this._apiKey);
+						return byokKnownModelsToAPIInfo(
+							this._isCustomUrl ? `${GeminiNativeBYOKLMProvider.providerName} (Custom)` : GeminiNativeBYOKLMProvider.providerName,
+							models
+						);
 					} catch (retryError) {
 						this._logService.error(`Error after re-prompting for API key: ${toErrorMessage(retryError, true)}`);
 					}

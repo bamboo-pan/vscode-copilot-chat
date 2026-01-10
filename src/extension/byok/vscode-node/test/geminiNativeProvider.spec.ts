@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
+import type { IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import type { CapturingToken } from '../../../../platform/requestLogger/common/capturingToken';
 import type { IRequestLogger } from '../../../../platform/requestLogger/node/requestLogger';
 import { TestLogService } from '../../../../platform/testing/common/testLogService';
@@ -52,6 +53,19 @@ vi.mock('../../common/byokProvider', async (importOriginal) => {
 	};
 });
 
+// Mock the UI service functions to avoid vscode window API calls
+const mockShowConfigurationMenu = vi.fn();
+const mockConfigureBYOKProviderWithCustomUrl = vi.fn();
+
+vi.mock('../byokUIService', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../byokUIService')>();
+	return {
+		...actual,
+		showConfigurationMenu: (...args: unknown[]) => mockShowConfigurationMenu(...args),
+		configureBYOKProviderWithCustomUrl: (...args: unknown[]) => mockConfigureBYOKProviderWithCustomUrl(...args),
+	};
+});
+
 type ProgressItem = vscode.LanguageModelResponsePart2;
 
 class TestProgress implements vscode.Progress<ProgressItem> {
@@ -95,15 +109,33 @@ function createRequestLogger(): IRequestLogger {
 	} as unknown as IRequestLogger;
 }
 
+function createConfigurationService(overrides?: Record<string, unknown>): IConfigurationService {
+	return {
+		_serviceBrand: undefined,
+		getConfig: vi.fn().mockImplementation((key: { key: string }) => {
+			if (overrides && key.key in overrides) {
+				return overrides[key.key];
+			}
+			return '';
+		}),
+		setConfig: vi.fn().mockResolvedValue(undefined),
+		getExperimentBasedConfig: vi.fn().mockReturnValue(undefined),
+		onDidChangeConfiguration: new vscode.EventEmitter<unknown>().event,
+	} as unknown as IConfigurationService;
+}
+
 describe('GeminiNativeBYOKLMProvider', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		// Reset UI mocks to default behavior
+		mockShowConfigurationMenu.mockResolvedValue(undefined);
+		mockConfigureBYOKProviderWithCustomUrl.mockResolvedValue({ cancelled: true });
 	});
 
 	it('throws a clear error when no API key is configured (no silent return)', async () => {
 		const { GeminiNativeBYOKLMProvider } = await import('../geminiNativeProvider');
 		const storage = createStorageService({ getAPIKey: vi.fn().mockResolvedValue(undefined) });
-		const provider = new GeminiNativeBYOKLMProvider(undefined, storage, new TestLogService(), createRequestLogger());
+		const provider = new GeminiNativeBYOKLMProvider(undefined, storage, new TestLogService(), createRequestLogger(), createConfigurationService());
 
 		const model: vscode.LanguageModelChatInformation = {
 			id: 'gemini-2.0-flash',
@@ -141,10 +173,16 @@ describe('GeminiNativeBYOKLMProvider', () => {
 			}]
 		});
 
-		mockHandleAPIKeyUpdate.mockResolvedValue({ apiKey: 'k_test', deleted: false, cancelled: false });
+		// Mock the configuration wizard to return a successful configuration
+		mockConfigureBYOKProviderWithCustomUrl.mockResolvedValue({
+			cancelled: false,
+			baseUrl: 'https://generativelanguage.googleapis.com',
+			apiKey: 'k_test',
+			isCustomUrl: false
+		});
 
 		const storage = createStorageService({ getAPIKey: vi.fn().mockResolvedValue('k_test') });
-		const provider = new GeminiNativeBYOKLMProvider(undefined, storage, new TestLogService(), createRequestLogger());
+		const provider = new GeminiNativeBYOKLMProvider(undefined, storage, new TestLogService(), createRequestLogger(), createConfigurationService());
 
 		await provider.updateAPIKey();
 		expect(MockGoogleGenAI.createdWithApiKeys).toEqual(['k_test']);
@@ -183,15 +221,20 @@ describe('GeminiNativeBYOKLMProvider', () => {
 		MockGoogleGenAI.streamChunks.length = 0;
 
 		const storage = createStorageService({ getAPIKey: vi.fn().mockResolvedValue(undefined) });
-		const provider = new GeminiNativeBYOKLMProvider(undefined, storage, new TestLogService(), createRequestLogger());
+		const provider = new GeminiNativeBYOKLMProvider(undefined, storage, new TestLogService(), createRequestLogger(), createConfigurationService());
 
 		// First set a key
-		mockHandleAPIKeyUpdate.mockResolvedValueOnce({ apiKey: 'k_initial', deleted: false, cancelled: false });
+		mockConfigureBYOKProviderWithCustomUrl.mockResolvedValueOnce({
+			cancelled: false,
+			baseUrl: 'https://generativelanguage.googleapis.com',
+			apiKey: 'k_initial',
+			isCustomUrl: false
+		});
 		await provider.updateAPIKey();
 		expect(MockGoogleGenAI.createdWithApiKeys).toEqual(['k_initial']);
 
-		// Then delete it
-		mockHandleAPIKeyUpdate.mockResolvedValueOnce({ apiKey: undefined, deleted: true, cancelled: false });
+		// Then reset (delete) via configuration menu
+		mockShowConfigurationMenu.mockResolvedValueOnce('reset');
 		await provider.updateAPIKey();
 
 		const model: vscode.LanguageModelChatInformation = {
@@ -231,16 +274,17 @@ describe('GeminiNativeBYOKLMProvider', () => {
 			getAPIKey: vi.fn().mockResolvedValue('bad_key'),
 		});
 
-		mockHandleAPIKeyUpdate.mockResolvedValue({ apiKey: undefined, deleted: false, cancelled: true });
+		// Mock the configuration wizard to return cancelled
+		mockConfigureBYOKProviderWithCustomUrl.mockResolvedValue({ cancelled: true });
 
-		const provider = new GeminiNativeBYOKLMProvider(undefined, storage, new TestLogService(), createRequestLogger());
+		const provider = new GeminiNativeBYOKLMProvider(undefined, storage, new TestLogService(), createRequestLogger(), createConfigurationService());
 		const tokenSource = new vscode.CancellationTokenSource();
 		const models = await provider.provideLanguageModelChatInformation({ silent: false }, tokenSource.token);
 
 		// When the key is invalid, we should re-prompt for a new one
 		// and handle the failure gracefully by returning an empty list.
 		expect(models).toEqual([]);
-		expect(mockHandleAPIKeyUpdate).toHaveBeenCalled();
+		expect(mockConfigureBYOKProviderWithCustomUrl).toHaveBeenCalled();
 	});
 
 	it('retries listing models after re-prompting with a valid API key', async () => {
@@ -267,7 +311,13 @@ describe('GeminiNativeBYOKLMProvider', () => {
 			getAPIKey: vi.fn().mockResolvedValue('bad_key'),
 		});
 
-		mockHandleAPIKeyUpdate.mockResolvedValue({ apiKey: 'k_new', deleted: false, cancelled: false });
+		// Mock the configuration wizard to return a new valid key after re-prompting
+		mockConfigureBYOKProviderWithCustomUrl.mockResolvedValue({
+			cancelled: false,
+			baseUrl: 'https://generativelanguage.googleapis.com',
+			apiKey: 'k_new',
+			isCustomUrl: false
+		});
 
 		const knownModels = {
 			[modelId]: {
@@ -279,7 +329,7 @@ describe('GeminiNativeBYOKLMProvider', () => {
 			}
 		};
 
-		const provider = new GeminiNativeBYOKLMProvider(knownModels, storage, new TestLogService(), createRequestLogger());
+		const provider = new GeminiNativeBYOKLMProvider(knownModels, storage, new TestLogService(), createRequestLogger(), createConfigurationService());
 		const tokenSource = new vscode.CancellationTokenSource();
 		const models = await provider.provideLanguageModelChatInformation({ silent: false }, tokenSource.token);
 
@@ -287,6 +337,6 @@ describe('GeminiNativeBYOKLMProvider', () => {
 		// we should retry listing models and succeed with the new key.
 		expect(models.map(m => m.id)).toEqual([modelId]);
 		expect(iterationCount).toBe(2);
-		expect(mockHandleAPIKeyUpdate).toHaveBeenCalled();
+		expect(mockConfigureBYOKProviderWithCustomUrl).toHaveBeenCalled();
 	});
 });

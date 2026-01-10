@@ -19,15 +19,17 @@ import { toErrorMessage } from '../../../util/common/errorMessage';
 import { RecordedProgress } from '../../../util/common/progressRecorder';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { anthropicMessagesToRawMessagesForLogging, apiMessageToAnthropicMessage } from '../common/anthropicMessageConverter';
-import { BYOKAuthType, BYOKKnownModels, byokKnownModelsToAPIInfo, BYOKModelCapabilities, BYOKModelProvider, handleAPIKeyUpdate, LMResponsePart } from '../common/byokProvider';
+import { BYOKAuthType, BYOKKnownModels, byokKnownModelsToAPIInfo, BYOKModelCapabilities, BYOKModelProvider, LMResponsePart } from '../common/byokProvider';
 import { IBYOKStorageService } from './byokStorageService';
-import { promptForAPIKey } from './byokUIService';
+import { BYOK_OFFICIAL_URLS, configureBYOKProviderWithCustomUrl, showConfigurationMenu } from './byokUIService';
 
 export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatInformation> {
 	public static readonly providerName = 'Anthropic';
+	public static readonly officialBaseUrl = BYOK_OFFICIAL_URLS.Anthropic;
 	public readonly authType: BYOKAuthType = BYOKAuthType.GlobalApiKey;
 	private _anthropicAPIClient: Anthropic | undefined;
 	private _apiKey: string | undefined;
+	private _isCustomUrl: boolean = false;
 	constructor(
 		private readonly _knownModels: BYOKKnownModels | undefined,
 		private readonly _byokStorageService: IBYOKStorageService,
@@ -37,19 +39,60 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 		@IExperimentationService private readonly _experimentationService: IExperimentationService
 	) { }
 
+	/**
+	 * Get the base URL from configuration or use official URL
+	 */
+	private _getBaseUrl(): string {
+		const customUrl = this._configurationService.getConfig(ConfigKey.BYOKAnthropicBaseUrl);
+		if (customUrl && customUrl.trim()) {
+			this._isCustomUrl = true;
+			return customUrl.trim().replace(/\/+$/, ''); // Normalize by removing trailing slashes
+		}
+		this._isCustomUrl = false;
+		return AnthropicLMProvider.officialBaseUrl;
+	}
+
+	/**
+	 * Check if using a custom URL
+	 */
+	public isUsingCustomUrl(): boolean {
+		return this._isCustomUrl;
+	}
+
 	private _getThinkingBudget(modelId: string, maxOutputTokens: number): number | undefined {
 		const configuredBudget = this._configurationService.getExperimentBasedConfig(ConfigKey.AnthropicThinkingBudget, this._experimentationService);
 		if (!configuredBudget || configuredBudget === 0) {
 			return undefined;
 		}
 
+		// Check known models first, then infer capabilities for unknown models
 		const modelCapabilities = this._knownModels?.[modelId];
-		const modelSupportsThinking = modelCapabilities?.thinking ?? false;
+		const modelSupportsThinking = modelCapabilities?.thinking ?? this._inferSupportsThinking(modelId);
 		if (!modelSupportsThinking) {
 			return undefined;
 		}
 		const normalizedBudget = configuredBudget < 1024 ? 1024 : configuredBudget;
 		return Math.min(32000, maxOutputTokens - 1, normalizedBudget);
+	}
+
+	/**
+	 * Infer if a model supports extended thinking based on model ID patterns.
+	 * Claude 3.5 Sonnet, Claude 3.7, and Claude 4 series models support thinking.
+	 */
+	private _inferSupportsThinking(modelId: string): boolean {
+		const normalized = modelId.toLowerCase();
+		// Claude 3.5+ and 3.7 models
+		if (normalized.includes('claude-3-5') || normalized.includes('claude-3-7')) {
+			return true;
+		}
+		// Claude 4 series - match both specific variants and generic claude-4 pattern
+		if (normalized.includes('claude-sonnet-4') ||
+			normalized.includes('claude-opus-4') ||
+			normalized.includes('claude-haiku-4') ||
+			normalized.includes('claude-4')) {
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -71,10 +114,53 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 			normalized.startsWith('claude-opus-4');
 	}
 
+	/**
+	 * Infer model capabilities based on model ID patterns for unknown models.
+	 * This provides reasonable defaults when the model is not in the known models list.
+	 */
+	private _inferModelCapabilities(modelId: string, displayName: string | undefined): BYOKModelCapabilities {
+		const normalized = modelId.toLowerCase();
+
+		// Determine if the model supports vision (Claude 3+ and Claude 4 models typically support vision)
+		const supportsVision = normalized.includes('claude-3') ||
+			normalized.includes('claude-sonnet-4') ||
+			normalized.includes('claude-opus-4') ||
+			normalized.includes('claude-haiku-4') ||
+			normalized.includes('claude-4');
+
+		// Determine if the model supports extended thinking
+		const supportsThinking = this._inferSupportsThinking(modelId);
+
+		// Infer token limits based on model series
+		let maxInputTokens = 100000;
+		let maxOutputTokens = 16000;
+
+		if (normalized.includes('claude-3-5') || normalized.includes('claude-3-7')) {
+			maxInputTokens = 200000;
+			maxOutputTokens = 8192;
+		} else if (normalized.includes('claude-sonnet-4') || normalized.includes('claude-opus-4') || normalized.includes('claude-4')) {
+			maxInputTokens = 200000;
+			maxOutputTokens = 16000;
+		}
+
+		// Use display_name if available, otherwise fall back to model ID
+		const name = displayName && displayName.trim() ? displayName : modelId;
+
+		return {
+			maxInputTokens,
+			maxOutputTokens,
+			name,
+			toolCalling: true,
+			vision: supportsVision,
+			thinking: supportsThinking
+		};
+	}
+
 	// Filters the byok known models based on what the anthropic API knows as well
 	private async getAllModels(apiKey: string): Promise<BYOKKnownModels> {
+		const baseUrl = this._getBaseUrl();
 		if (!this._anthropicAPIClient) {
-			this._anthropicAPIClient = new Anthropic({ apiKey });
+			this._anthropicAPIClient = new Anthropic({ apiKey, baseURL: baseUrl });
 		}
 		try {
 			const response = await this._anthropicAPIClient.models.list();
@@ -83,15 +169,8 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 				if (this._knownModels && this._knownModels[model.id]) {
 					modelList[model.id] = this._knownModels[model.id];
 				} else {
-					// Mix in generic capabilities for models we don't know
-					modelList[model.id] = {
-						maxInputTokens: 100000,
-						maxOutputTokens: 16000,
-						name: model.display_name,
-						toolCalling: true,
-						vision: false,
-						thinking: false
-					};
+					// Infer capabilities for models we don't know
+					modelList[model.id] = this._inferModelCapabilities(model.id, model.display_name);
 				}
 			}
 			return modelList;
@@ -102,18 +181,77 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 	}
 
 	async updateAPIKey(): Promise<void> {
-		const result = await handleAPIKeyUpdate(AnthropicLMProvider.providerName, this._byokStorageService, promptForAPIKey);
-		if (!result.cancelled) {
-			this._apiKey = result.apiKey;
-			this._anthropicAPIClient = undefined;
+		// Check if using custom URL - if so, use multi-step configuration
+		const currentBaseUrl = this._getBaseUrl();
+		const hasExistingConfig = await this._byokStorageService.getAPIKey(AnthropicLMProvider.providerName, undefined, this._isCustomUrl) !== undefined;
+
+		if (hasExistingConfig) {
+			// Show configuration menu for existing configurations
+			const action = await showConfigurationMenu(AnthropicLMProvider.providerName, currentBaseUrl);
+			if (!action) {
+				return;
+			}
+
+			if (action === 'view') {
+				// Just refresh models - the caller will handle displaying
+				return;
+			} else if (action === 'reset') {
+				// Reset to default
+				await this._configurationService.setConfig(ConfigKey.BYOKAnthropicBaseUrl, '');
+				await this._byokStorageService.deleteAPIKey(AnthropicLMProvider.providerName, this.authType, undefined, true);
+				this._apiKey = undefined;
+				this._anthropicAPIClient = undefined;
+				this._isCustomUrl = false;
+				return;
+			}
+			// Fall through to 'modify'
 		}
+
+		// Use multi-step configuration wizard
+		const result = await configureBYOKProviderWithCustomUrl(
+			AnthropicLMProvider.providerName,
+			currentBaseUrl !== AnthropicLMProvider.officialBaseUrl ? currentBaseUrl : undefined,
+			async (baseUrl, apiKey) => {
+				try {
+					const testClient = new Anthropic({ apiKey, baseURL: baseUrl });
+					const response = await testClient.models.list();
+					return { success: true, modelCount: response.data.length };
+				} catch (error) {
+					return { success: false, error: error instanceof Error ? error.message : String(error) };
+				}
+			}
+		);
+
+		if (result.cancelled) {
+			return;
+		}
+
+		// Save configuration
+		if (result.baseUrl && result.baseUrl !== AnthropicLMProvider.officialBaseUrl) {
+			await this._configurationService.setConfig(ConfigKey.BYOKAnthropicBaseUrl, result.baseUrl);
+		} else {
+			await this._configurationService.setConfig(ConfigKey.BYOKAnthropicBaseUrl, '');
+		}
+
+		if (result.apiKey) {
+			this._apiKey = result.apiKey;
+			await this._byokStorageService.storeAPIKey(
+				AnthropicLMProvider.providerName,
+				result.apiKey,
+				this.authType,
+				undefined,
+				result.isCustomUrl
+			);
+		}
+
+		this._anthropicAPIClient = undefined; // Reset client to use new configuration
 	}
 
 	async updateAPIKeyViaCmd(envVarName: string, action: 'update' | 'remove' = 'update', modelId?: string): Promise<void> {
 		if (action === 'remove') {
 			this._apiKey = undefined;
 			this._anthropicAPIClient = undefined;
-			await this._byokStorageService.deleteAPIKey(AnthropicLMProvider.providerName, this.authType, modelId);
+			await this._byokStorageService.deleteAPIKey(AnthropicLMProvider.providerName, this.authType, modelId, this._isCustomUrl);
 			this._logService.info(`BYOK: API key removed for provider ${AnthropicLMProvider.providerName}`);
 			return;
 		}
@@ -124,24 +262,33 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 		}
 
 		this._apiKey = apiKey;
-		await this._byokStorageService.storeAPIKey(AnthropicLMProvider.providerName, apiKey, this.authType, modelId);
+		await this._byokStorageService.storeAPIKey(AnthropicLMProvider.providerName, apiKey, this.authType, modelId, this._isCustomUrl);
 		this._anthropicAPIClient = undefined;
 		this._logService.info(`BYOK: API key updated for provider ${AnthropicLMProvider.providerName} from environment variable ${envVarName}`);
 	}
 
 	async provideLanguageModelChatInformation(options: { silent: boolean }, token: CancellationToken): Promise<LanguageModelChatInformation[]> {
 		if (!this._apiKey) { // If we don't have the API key it might just be in storage, so we try to read it first
-			this._apiKey = await this._byokStorageService.getAPIKey(AnthropicLMProvider.providerName);
+			this._apiKey = await this._byokStorageService.getAPIKey(AnthropicLMProvider.providerName, undefined, this._isCustomUrl);
 		}
 		try {
 			if (this._apiKey) {
-				return byokKnownModelsToAPIInfo(AnthropicLMProvider.providerName, await this.getAllModels(this._apiKey));
+				const models = await this.getAllModels(this._apiKey);
+				// Add custom suffix if using custom URL
+				return byokKnownModelsToAPIInfo(
+					this._isCustomUrl ? `${AnthropicLMProvider.providerName} (Custom)` : AnthropicLMProvider.providerName,
+					models
+				);
 			} else if (options.silent && !this._apiKey) {
 				return [];
 			} else { // Not silent, and no api key = good to prompt user for api key
 				await this.updateAPIKey();
 				if (this._apiKey) {
-					return byokKnownModelsToAPIInfo(AnthropicLMProvider.providerName, await this.getAllModels(this._apiKey));
+					const models = await this.getAllModels(this._apiKey);
+					return byokKnownModelsToAPIInfo(
+						this._isCustomUrl ? `${AnthropicLMProvider.providerName} (Custom)` : AnthropicLMProvider.providerName,
+						models
+					);
 				} else {
 					return [];
 				}
@@ -154,7 +301,11 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 				await this.updateAPIKey();
 				if (this._apiKey) {
 					try {
-						return byokKnownModelsToAPIInfo(AnthropicLMProvider.providerName, await this.getAllModels(this._apiKey));
+						const models = await this.getAllModels(this._apiKey);
+						return byokKnownModelsToAPIInfo(
+							this._isCustomUrl ? `${AnthropicLMProvider.providerName} (Custom)` : AnthropicLMProvider.providerName,
+							models
+						);
 					} catch (retryError) {
 						this._logService.error(`Error after re-prompting for API key: ${toErrorMessage(retryError, true)}`);
 					}

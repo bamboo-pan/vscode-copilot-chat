@@ -69,7 +69,7 @@ export class XAIBYOKLMProvider extends BaseOpenAICompatibleLMProvider {
 
 	protected override async getAllModels(): Promise<BYOKKnownModels> {
 		try {
-			const response = await this._fetcherService.fetch(`${this._baseUrl}/language-models`, {
+			const response = await this._fetcherService.fetch(`${this.getBaseUrl()}/language-models`, {
 				method: 'GET',
 				headers: {
 					'Authorization': `Bearer ${this._apiKey}`,

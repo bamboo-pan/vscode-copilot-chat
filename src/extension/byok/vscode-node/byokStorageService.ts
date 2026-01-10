@@ -15,18 +15,21 @@ export interface StoredModelConfig {
 export interface IBYOKStorageService {
 	/**
 	 * Get API key for a provider or model
+	 * @param isCustomUrl If true, retrieves the API key for custom URL configuration
 	 */
-	getAPIKey(providerName: string, modelId?: string): Promise<string | undefined>;
+	getAPIKey(providerName: string, modelId?: string, isCustomUrl?: boolean): Promise<string | undefined>;
 
 	/**
 	 * Store API key for a provider or model based on auth type
+	 * @param isCustomUrl If true, stores the API key for custom URL configuration
 	 */
-	storeAPIKey(providerName: string, apiKey: string, authType: BYOKAuthType, modelId?: string): Promise<void>;
+	storeAPIKey(providerName: string, apiKey: string, authType: BYOKAuthType, modelId?: string, isCustomUrl?: boolean): Promise<void>;
 
 	/**
 	 * Delete API key for a provider or model based on auth type
+	 * @param isCustomUrl If true, deletes the API key for custom URL configuration
 	 */
-	deleteAPIKey(providerName: string, authType: BYOKAuthType, modelId?: string): Promise<void>;
+	deleteAPIKey(providerName: string, authType: BYOKAuthType, modelId?: string, isCustomUrl?: boolean): Promise<void>;
 
 	/**
 	 * Get all stored model configurations for a provider
@@ -62,10 +65,18 @@ export class BYOKStorageService implements IBYOKStorageService {
 		this._extensionContext = extensionContext;
 	}
 
-	public async getAPIKey(providerName: string, modelId?: string): Promise<string | undefined> {
+	private _getApiKeyStorageKey(providerName: string, modelId?: string, isCustomUrl?: boolean): string {
+		const suffix = isCustomUrl ? '-custom' : '';
+		if (modelId) {
+			return `copilot-byok-${providerName}-${modelId}-api-key${suffix}`;
+		}
+		return `copilot-byok-${providerName}-api-key${suffix}`;
+	}
+
+	public async getAPIKey(providerName: string, modelId?: string, isCustomUrl?: boolean): Promise<string | undefined> {
 		// If model-specific key is requested, try to get it first
 		if (modelId) {
-			const modelKey = await this._extensionContext.secrets.get(`copilot-byok-${providerName}-${modelId}-api-key`);
+			const modelKey = await this._extensionContext.secrets.get(this._getApiKeyStorageKey(providerName, modelId, isCustomUrl));
 			// Only return the key if it's non-empty after trimming, and return the trimmed version
 			if (modelKey && modelKey.trim()) {
 				return modelKey.trim();
@@ -73,12 +84,12 @@ export class BYOKStorageService implements IBYOKStorageService {
 		}
 
 		// Fall back to provider key if no model-specific key or it was requested directly
-		const providerKey = await this._extensionContext.secrets.get(`copilot-byok-${providerName}-api-key`);
+		const providerKey = await this._extensionContext.secrets.get(this._getApiKeyStorageKey(providerName, undefined, isCustomUrl));
 		// Only return the key if it's non-empty after trimming, and return the trimmed version
 		return providerKey?.trim() || undefined;
 	}
 
-	public async storeAPIKey(providerName: string, apiKey: string, authType: BYOKAuthType, modelId?: string): Promise<void> {
+	public async storeAPIKey(providerName: string, apiKey: string, authType: BYOKAuthType, modelId?: string, isCustomUrl?: boolean): Promise<void> {
 		// Store API keys based on the provider's auth type
 		if (authType === BYOKAuthType.None) {
 			// Don't store keys for None auth type providers
@@ -93,24 +104,24 @@ export class BYOKStorageService implements IBYOKStorageService {
 
 		if (authType === BYOKAuthType.GlobalApiKey) {
 			// For GlobalApiKey providers, only store at provider level
-			await this._extensionContext.secrets.store(`copilot-byok-${providerName}-api-key`, apiKey);
+			await this._extensionContext.secrets.store(this._getApiKeyStorageKey(providerName, undefined, isCustomUrl), apiKey);
 		} else if (authType === BYOKAuthType.PerModelDeployment && modelId) {
 			// For PerModelDeployment providers, store per model
-			await this._extensionContext.secrets.store(`copilot-byok-${providerName}-${modelId}-api-key`, apiKey);
+			await this._extensionContext.secrets.store(this._getApiKeyStorageKey(providerName, modelId, isCustomUrl), apiKey);
 		}
 	}
 
-	public async deleteAPIKey(providerName: string, authType: BYOKAuthType, modelId?: string): Promise<void> {
+	public async deleteAPIKey(providerName: string, authType: BYOKAuthType, modelId?: string, isCustomUrl?: boolean): Promise<void> {
 		// Delete API keys based on the provider's auth type
 		if (authType === BYOKAuthType.None) {
 			// Nothing to delete for None auth type providers
 			return;
 		} else if (authType === BYOKAuthType.GlobalApiKey) {
 			// For GlobalApiKey providers, delete at provider level
-			await this._extensionContext.secrets.delete(`copilot-byok-${providerName}-api-key`);
+			await this._extensionContext.secrets.delete(this._getApiKeyStorageKey(providerName, undefined, isCustomUrl));
 		} else if (authType === BYOKAuthType.PerModelDeployment && modelId) {
 			// For PerModelDeployment providers, delete per model
-			await this._extensionContext.secrets.delete(`copilot-byok-${providerName}-${modelId}-api-key`);
+			await this._extensionContext.secrets.delete(this._getApiKeyStorageKey(providerName, modelId, isCustomUrl));
 		}
 	}
 

@@ -23,7 +23,7 @@
 	"icon": "assets/copilot.png",
 	"pricing": "Trial",
 	"engines": {
-		"vscode": "^1.109.0",
+		"vscode": "^1.108.0",
 		"npm": ">=9.0.0",
 		"node": ">=22.14.0"
 	},
@@ -2607,6 +2607,30 @@
 							"preview"
 						],
 						"markdownDescription": "%github.copilot.config.byok.ollamaEndpoint%"
+					},
+					"github.copilot.chat.byok.anthropic.baseUrl": {
+						"type": "string",
+						"default": "",
+						"tags": [
+							"preview"
+						],
+						"markdownDescription": "%github.copilot.config.byok.anthropic.baseUrl%"
+					},
+					"github.copilot.chat.byok.openai.baseUrl": {
+						"type": "string",
+						"default": "",
+						"tags": [
+							"preview"
+						],
+						"markdownDescription": "%github.copilot.config.byok.openai.baseUrl%"
+					},
+					"github.copilot.chat.byok.google.baseUrl": {
+						"type": "string",
+						"default": "",
+						"tags": [
+							"preview"
+						],
+						"markdownDescription": "%github.copilot.config.byok.google.baseUrl%"
 					}
 				}
 			},
