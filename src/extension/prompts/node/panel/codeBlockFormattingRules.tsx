@@ -5,6 +5,7 @@
 
 import { BasePromptElementProps, PromptElement, PromptSizing } from '@vscode/prompt-tsx';
 import { filepathCodeBlockMarker } from '../../../../util/common/markdown';
+import { IPromptCustomizationService, PromptComponentId } from '../../../promptCustomizer/common';
 import { ExampleCodeBlock } from './safeElements';
 
 export interface CodeBlockFormattingRulesPromptProps extends BasePromptElementProps {
@@ -14,8 +15,19 @@ export interface CodeBlockFormattingRulesPromptProps extends BasePromptElementPr
 export const EXISTING_CODE_MARKER = '...existing code...';
 
 export class CodeBlockFormattingRules extends PromptElement<CodeBlockFormattingRulesPromptProps> {
+	constructor(
+		props: CodeBlockFormattingRulesPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
 
 	public override render(state: void, sizing: PromptSizing) {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.CodeBlockFormattingRules)) {
+			return undefined;
+		}
+
 		return (
 			<>
 				When suggesting code changes or new content, use Markdown code blocks.<br />

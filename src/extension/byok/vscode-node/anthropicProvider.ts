@@ -10,13 +10,15 @@ import { ChatFetchResponseType, ChatLocation } from '../../../platform/chat/comm
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { CustomDataPartMimeTypes } from '../../../platform/endpoint/common/endpointTypes';
 import { ILogService } from '../../../platform/log/common/logService';
-import { ContextManagementResponse, getContextManagementFromConfig } from '../../../platform/networking/common/anthropic';
+import { buildContextManagement, ContextEditingConfig, ContextManagement, ContextManagementResponse, getContextManagementFromConfig } from '../../../platform/networking/common/anthropic';
 import { IResponseDelta, OpenAiFunctionTool } from '../../../platform/networking/common/fetch';
 import { APIUsage } from '../../../platform/networking/common/openai';
 import { IRequestLogger } from '../../../platform/requestLogger/node/requestLogger';
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
+import { ITokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
 import { toErrorMessage } from '../../../util/common/errorMessage';
 import { RecordedProgress } from '../../../util/common/progressRecorder';
+import { TokenizerType } from '../../../util/common/tokenizer';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { anthropicMessagesToRawMessagesForLogging, apiMessageToAnthropicMessage } from '../common/anthropicMessageConverter';
 import { BYOKAuthType, BYOKKnownModels, byokKnownModelsToAPIInfo, BYOKModelCapabilities, BYOKModelProvider, LMResponsePart } from '../common/byokProvider';
@@ -30,13 +32,21 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 	private _anthropicAPIClient: Anthropic | undefined;
 	private _apiKey: string | undefined;
 	private _isCustomUrl: boolean = false;
+	/**
+	 * Safety factor for token counting.
+	 * Claude's tokenizer may produce different token counts than tiktoken.
+	 * Using 1.3x provides a safety margin to prevent "Prompt is too long" errors.
+	 */
+	private static readonly TOKEN_COUNT_SAFETY_FACTOR = 1.3;
+
 	constructor(
 		private readonly _knownModels: BYOKKnownModels | undefined,
 		private readonly _byokStorageService: IBYOKStorageService,
 		@ILogService private readonly _logService: ILogService,
 		@IRequestLogger private readonly _requestLogger: IRequestLogger,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
-		@IExperimentationService private readonly _experimentationService: IExperimentationService
+		@IExperimentationService private readonly _experimentationService: IExperimentationService,
+		@ITokenizerProvider private readonly _tokenizerProvider: ITokenizerProvider
 	) { }
 
 	/**
@@ -115,10 +125,20 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 	}
 
 	/**
+	 * Custom URL safety factor for token limits.
+	 * Proxies like OpenRouter may have different token limits than Anthropic's official API.
+	 * Using a 60% factor provides a conservative limit to prevent "Prompt is too long" errors.
+	 */
+	private static readonly CUSTOM_URL_TOKEN_SAFETY_FACTOR = 0.6;
+
+	/**
 	 * Infer model capabilities based on model ID patterns for unknown models.
 	 * This provides reasonable defaults when the model is not in the known models list.
+	 * @param modelId The model ID to infer capabilities for
+	 * @param displayName The display name from the API (if available)
+	 * @param isCustomUrl Whether using a custom URL (proxies like OpenRouter)
 	 */
-	private _inferModelCapabilities(modelId: string, displayName: string | undefined): BYOKModelCapabilities {
+	private _inferModelCapabilities(modelId: string, displayName: string | undefined, isCustomUrl: boolean = false): BYOKModelCapabilities {
 		const normalized = modelId.toLowerCase();
 
 		// Determine if the model supports vision (Claude 3+ and Claude 4 models typically support vision)
@@ -143,6 +163,14 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 			maxOutputTokens = 16000;
 		}
 
+		// For custom URLs (proxies like OpenRouter), use more conservative token limits.
+		// Proxies don't support Anthropic's Context Editing beta feature, so we need to
+		// ensure prompts are short enough to avoid "Prompt is too long" errors.
+		if (isCustomUrl) {
+			maxInputTokens = Math.floor(maxInputTokens * AnthropicLMProvider.CUSTOM_URL_TOKEN_SAFETY_FACTOR);
+			this._logService.debug(`BYOK Anthropic: Using conservative token limit ${maxInputTokens} for custom URL model ${modelId}`);
+		}
+
 		// Use display_name if available, otherwise fall back to model ID
 		const name = displayName && displayName.trim() ? displayName : modelId;
 
@@ -156,6 +184,48 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 		};
 	}
 
+	/**
+	 * Get context management configuration for BYOK.
+	 * For custom URLs, enables context editing by default to prevent "Prompt is too long" errors
+	 * when the custom endpoint (e.g., OpenRouter) has different token limits than expected.
+	 * Falls back to user configuration if explicitly set.
+	 */
+	private _getContextManagement(thinkingBudget: number | undefined, modelMaxInputTokens: number): ContextManagement | undefined {
+		// First try to get from user configuration
+		const contextManagement = getContextManagementFromConfig(
+			this._configurationService,
+			this._experimentationService,
+			thinkingBudget,
+			modelMaxInputTokens
+		);
+
+		if (contextManagement) {
+			return contextManagement;
+		}
+
+		// Check if using custom URL directly from config (don't rely on cached _isCustomUrl state)
+		const customUrl = this._configurationService.getConfig(ConfigKey.BYOKAnthropicBaseUrl);
+		const isCustomUrl = customUrl && customUrl.trim() !== '';
+
+		// For custom URLs, enable context editing by default to handle potential token limit mismatches
+		// This helps prevent "Prompt is too long" errors when using proxies like OpenRouter
+		if (isCustomUrl) {
+			const defaultConfig: ContextEditingConfig = {
+				triggerType: 'input_tokens',
+				triggerValue: Math.floor(modelMaxInputTokens * 0.85), // Trigger at 85% capacity
+				keepCount: 10, // Keep last 10 tool uses
+				clearAtLeastTokens: Math.floor(modelMaxInputTokens * 0.2), // Clear at least 20%
+				excludeTools: [],
+				clearInputs: true, // Clear tool inputs to save tokens
+				thinkingKeepTurns: 2 // Keep last 2 thinking turns
+			};
+			this._logService.info(`BYOK Anthropic: Enabling default context editing for custom URL (trigger at ${defaultConfig.triggerValue} tokens)`);
+			return buildContextManagement(defaultConfig, thinkingBudget, modelMaxInputTokens);
+		}
+
+		return undefined;
+	}
+
 	// Filters the byok known models based on what the anthropic API knows as well
 	private async getAllModels(apiKey: string): Promise<BYOKKnownModels> {
 		const baseUrl = this._getBaseUrl();
@@ -167,10 +237,16 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 			const modelList: Record<string, BYOKModelCapabilities> = {};
 			for (const model of response.data) {
 				if (this._knownModels && this._knownModels[model.id]) {
-					modelList[model.id] = this._knownModels[model.id];
+					// For known models, apply custom URL safety factor if using a proxy
+					const capabilities = { ...this._knownModels[model.id] };
+					if (this._isCustomUrl) {
+						capabilities.maxInputTokens = Math.floor(capabilities.maxInputTokens * AnthropicLMProvider.CUSTOM_URL_TOKEN_SAFETY_FACTOR);
+						this._logService.debug(`BYOK Anthropic: Using conservative token limit ${capabilities.maxInputTokens} for custom URL model ${model.id}`);
+					}
+					modelList[model.id] = capabilities;
 				} else {
 					// Infer capabilities for models we don't know
-					modelList[model.id] = this._inferModelCapabilities(model.id, model.display_name);
+					modelList[model.id] = this._inferModelCapabilities(model.id, model.display_name, this._isCustomUrl);
 				}
 			}
 			return modelList;
@@ -319,6 +395,10 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 		if (!this._anthropicAPIClient) {
 			return;
 		}
+
+		// Log model token limits for debugging BYOK token budget issues
+		this._logService.info(`BYOK Anthropic: sending request to model=${model.id}, maxInputTokens=${model.maxInputTokens}, maxOutputTokens=${model.maxOutputTokens}, isCustomUrl=${this._isCustomUrl}, messageCount=${messages.length}`);
+
 		// Convert the messages from the API format into messages that we can use against anthropic
 		const { system, messages: convertedMessages } = apiMessageToAnthropicMessage(messages as LanguageModelChatMessage[]);
 
@@ -423,12 +503,8 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 		const thinkingBudget = this._getThinkingBudget(model.id, model.maxOutputTokens);
 
 		// Build context management configuration
-		const contextManagement = getContextManagementFromConfig(
-			this._configurationService,
-			this._experimentationService,
-			thinkingBudget,
-			model.maxInputTokens
-		);
+		// For custom URLs, context editing is enabled by default to prevent "Prompt is too long" errors
+		const contextManagement = this._getContextManagement(thinkingBudget, model.maxInputTokens);
 
 		// Build betas array for beta API features
 		const betas: string[] = [];
@@ -531,8 +607,18 @@ export class AnthropicLMProvider implements BYOKModelProvider<LanguageModelChatI
 	}
 
 	async provideTokenCount(model: LanguageModelChatInformation, text: string | LanguageModelChatMessage | LanguageModelChatMessage2, token: CancellationToken): Promise<number> {
-		// Simple estimation - actual token count would require Claude's tokenizer
-		return Math.ceil(text.toString().length / 4);
+		try {
+			// Use tiktoken (o200k) with a safety factor to approximate Claude's tokenizer.
+			// Claude's tokenizer may produce different counts, so we multiply by a safety factor
+			// to err on the side of caution and trigger summarization earlier.
+			const tokenizer = this._tokenizerProvider.acquireTokenizer({ tokenizer: TokenizerType.O200K });
+			const baseCount = await tokenizer.tokenLength(text.toString());
+			return Math.ceil(baseCount * AnthropicLMProvider.TOKEN_COUNT_SAFETY_FACTOR);
+		} catch (error) {
+			// Fallback to character-based estimation if tokenizer fails
+			this._logService.warn(`Failed to count tokens with tiktoken, using fallback: ${error}`);
+			return Math.ceil(text.toString().length / 3); // More conservative fallback
+		}
 	}
 
 	private async _makeRequest(progress: RecordedProgress<LMResponsePart>, params: Anthropic.Beta.Messages.MessageCreateParamsStreaming, betas: string[], token: CancellationToken): Promise<{ ttft: number | undefined; usage: APIUsage | undefined; contextManagement: ContextManagementResponse | undefined }> {

@@ -11,7 +11,7 @@ import { ResponseTranslationRules } from '../base/responseTranslationRules';
 import { Tag } from '../base/tag';
 import { EXISTING_CODE_MARKER } from '../panel/codeBlockFormattingRules';
 import { MathIntegrationRules } from '../panel/editorIntegrationRules';
-import { CodesearchModeInstructions, DefaultAgentPromptProps, detectToolCapabilities, GenericEditingTips, McpToolInstructions, NotebookInstructions } from './defaultAgentInstructions';
+import { CodesearchModeInstructions, CustomPromptComponents, DefaultAgentPromptProps, detectToolCapabilities, GenericEditingTips, McpToolInstructions, NotebookInstructions } from './defaultAgentInstructions';
 import { FileLinkificationInstructions } from './fileLinkificationInstructions';
 import { IAgentPrompt, PromptRegistry, SystemPrompt } from './promptRegistry';
 
@@ -61,7 +61,7 @@ class DefaultGrokCodeFastAgentPrompt extends PromptElement<DefaultAgentPromptPro
 				Tools can be disabled by the user. You may see tools used previously in the conversation that are not currently available. Be careful to only use the tools that are currently available to you.
 			</Tag>
 			{this.props.codesearchMode && <CodesearchModeInstructions {...this.props} />}
-			{tools[ToolName.EditFile] && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
+			{(tools[ToolName.EditFile] || tools[ToolName.ReplaceString]) && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
 				{tools[ToolName.ReplaceString] ?
 					<>
 						Before you edit an existing file, make sure you either already have it in the provided context, or read it with the {ToolName.ReadFile} tool, so that you can make proper changes.<br />
@@ -106,8 +106,9 @@ class DefaultGrokCodeFastAgentPrompt extends PromptElement<DefaultAgentPromptPro
 			<Tag name='outputFormatting'>
 				Use proper Markdown formatting. When referring to symbols (classes, methods, variables) in user's workspace wrap in backticks. For file paths and line number rules, see fileLinkification section below<br />
 				<FileLinkificationInstructions />
-				<MathIntegrationRules />
 			</Tag>
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<ResponseTranslationRules />
 		</InstructionMessage>;
 	}

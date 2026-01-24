@@ -11,6 +11,7 @@ import { FileType } from '../../../platform/filesystem/common/fileTypes';
 import { CustomAgentDetails, CustomAgentListItem, CustomAgentListOptions, IOctoKitService, PermissiveAuthRequiredError } from '../../../platform/github/common/githubService';
 import { ILogService } from '../../../platform/log/common/logService';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
+import { IAgentsManagementService } from '../../promptCustomizer/vscode-node/agentsManagementService';
 
 const AgentFileExtension = '.agent.md';
 
@@ -27,6 +28,7 @@ export class OrganizationAndEnterpriseAgentProvider extends Disposable implement
 		@ILogService private readonly logService: ILogService,
 		@IVSCodeExtensionContext readonly extensionContext: IVSCodeExtensionContext,
 		@IFileSystemService private readonly fileSystem: IFileSystemService,
+		@IAgentsManagementService private readonly agentsManagementService: IAgentsManagementService,
 	) {
 		super();
 
@@ -35,6 +37,12 @@ export class OrganizationAndEnterpriseAgentProvider extends Disposable implement
 		this.fetchAndUpdateCache().catch(error => {
 			this.logService.error(`[OrganizationAndEnterpriseAgentProvider] Error in background fetch: ${error}`);
 		});
+
+		// Listen for agents management service changes
+		this._register(this.agentsManagementService.onDidChangeConfiguration(() => {
+			this.memoryCache = undefined;
+			this._onDidChangeCustomAgents.fire();
+		}));
 	}
 
 	private getCacheDir(): vscode.Uri {
@@ -46,12 +54,31 @@ export class OrganizationAndEnterpriseAgentProvider extends Disposable implement
 		_token: vscode.CancellationToken
 	): Promise<vscode.CustomAgentResource[]> {
 		try {
+			let agents: vscode.CustomAgentResource[];
 			if (this.memoryCache !== undefined) {
-				return this.memoryCache;
+				agents = this.memoryCache;
+			} else {
+				// Return results from file cache
+				agents = await this.readFromCache();
 			}
 
-			// Return results from file cache
-			return await this.readFromCache();
+			// Register agents with management service for UI display
+			this.agentsManagementService.registerAgents(agents.map(a => ({
+				name: a.name,
+				description: a.description,
+				uri: a.uri,
+			})));
+
+			// Filter out disabled agents
+			const disabledAgentIds = this.agentsManagementService.getDisabledAgentIds();
+			if (disabledAgentIds.size > 0) {
+				agents = agents.filter(agent => {
+					const agentId = `agent:${agent.name.toLowerCase().replace(/\s+/g, '-')}`;
+					return !disabledAgentIds.has(agentId);
+				});
+			}
+
+			return agents;
 		} catch (error) {
 			this.logService.error(`[OrganizationAndEnterpriseAgentProvider] Error in provideCustomAgents: ${error}`);
 			return [];

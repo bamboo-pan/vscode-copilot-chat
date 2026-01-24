@@ -9,7 +9,8 @@ import { IChatEndpoint } from '../../../platform/networking/common/networking';
 import { equals as arraysEqual } from '../../../util/vs/base/common/arrays';
 import { Lazy } from '../../../util/vs/base/common/lazy';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
-import { getContributedToolName, getToolName, mapContributedToolNamesInSchema, mapContributedToolNamesInString, ToolName } from '../common/toolNames';
+import { IToolsManagementService } from '../../promptCustomizer/vscode-node/toolsManagementService';
+import { getContributedToolName, getToolName, isInternalTool, mapContributedToolNamesInSchema, mapContributedToolNamesInString, ToolName } from '../common/toolNames';
 import { ICopilotTool, ICopilotToolExtension, ToolRegistry } from '../common/toolsRegistry';
 import { BaseToolsService } from '../common/toolsService';
 
@@ -71,7 +72,8 @@ export class ToolsService extends BaseToolsService {
 
 	constructor(
 		@IInstantiationService instantiationService: IInstantiationService,
-		@ILogService logService: ILogService
+		@ILogService logService: ILogService,
+		@IToolsManagementService private readonly _toolsManagementService: IToolsManagementService,
 	) {
 		super(logService);
 		this._copilotTools = new Lazy(() => new Map(ToolRegistry.getTools().map(t => [t.toolName, instantiationService.createInstance(t)] as const)));
@@ -100,6 +102,9 @@ export class ToolsService extends BaseToolsService {
 	getEnabledTools(request: vscode.ChatRequest, endpoint: IChatEndpoint, filter?: (tool: vscode.LanguageModelToolInformation) => boolean | undefined): vscode.LanguageModelToolInformation[] {
 		const toolMap = new Map(this.tools.map(t => [t.name, t]));
 
+		// Get the set of tools disabled via Prompt Customizer
+		const disabledByCustomizer = this._toolsManagementService.getDisabledToolNames();
+
 		return this.tools
 			.map(tool => {
 				// Apply model-specific alternative if available via alternativeDefinition
@@ -117,6 +122,18 @@ export class ToolsService extends BaseToolsService {
 				return resultTool;
 			})
 			.filter(tool => {
+				// -2. Always filter out internal tools - they should never be sent to the model
+				// Internal tools are used by the extension infrastructure, not by the model
+				if (isInternalTool(tool.name)) {
+					return false;
+				}
+
+				// -1. Check if the tool was disabled via Prompt Customizer. If so, it must be disabled here
+				// Core required tools are always enabled regardless of Prompt Customizer settings
+				if (disabledByCustomizer.has(tool.name)) {
+					return false;
+				}
+
 				// 0. Check if the tool was disabled via the tool picker. If so, it must be disabled here
 				const toolPickerSelection = request.tools.get(getContributedToolName(tool.name));
 				if (toolPickerSelection === false) {

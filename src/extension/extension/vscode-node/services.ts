@@ -104,6 +104,11 @@ import { PromptVariablesServiceImpl } from '../../prompt/vscode-node/promptVaria
 import { RequestLogger } from '../../prompt/vscode-node/requestLoggerImpl';
 import { ScenarioAutomationEndpointProviderImpl } from '../../prompt/vscode-node/scenarioAutomationEndpointProviderImpl';
 import { SettingsEditorSearchServiceImpl } from '../../prompt/vscode-node/settingsEditorSearchServiceImpl';
+import { ISkillsManagementService, SkillsManagementService } from '../../promptCustomizer/common/skillsManagementService';
+import { IPromptCustomizationService } from '../../promptCustomizer/common/types';
+import { AgentsManagementService, IAgentsManagementService } from '../../promptCustomizer/vscode-node/agentsManagementService';
+import { PromptCustomizationServiceImpl } from '../../promptCustomizer/vscode-node/promptCustomizationServiceImpl';
+import { IToolsManagementService, ToolsManagementService } from '../../promptCustomizer/vscode-node/toolsManagementService';
 import { CodeMapperService, ICodeMapperService } from '../../prompts/node/codeMapper/codeMapperService';
 import { FixCookbookService, IFixCookbookService } from '../../prompts/node/inline/fixCookbookService';
 import { WorkspaceMutationManager } from '../../testing/node/setupTestsFileManager';
@@ -214,6 +219,10 @@ export function registerServices(builder: IInstantiationServiceBuilder, extensio
 	builder.define(IInlineEditsModelService, new SyncDescriptor(InlineEditsModelService));
 	builder.define(IUndesiredModelsManager, new SyncDescriptor(UndesiredModels.Manager));
 	builder.define(ICopilotInlineCompletionItemProviderService, new SyncDescriptor(CopilotInlineCompletionItemProviderService));
+	builder.define(IPromptCustomizationService, new SyncDescriptor(PromptCustomizationServiceImpl));
+	builder.define(ISkillsManagementService, new SyncDescriptor(SkillsManagementService));
+	builder.define(IAgentsManagementService, new SyncDescriptor(AgentsManagementService));
+	builder.define(IToolsManagementService, new SyncDescriptor(ToolsManagementService));
 }
 
 function setupMSFTExperimentationService(builder: IInstantiationServiceBuilder, extensionContext: ExtensionContext) {

@@ -6,6 +6,7 @@
 import { PromptElement, PromptSizing } from '@vscode/prompt-tsx';
 import { isGpt51Family, isGptCodexFamily } from '../../../../../platform/endpoint/common/chatModelCapabilities';
 import { IChatEndpoint } from '../../../../../platform/networking/common/networking';
+import { IPromptCustomizationService, PromptComponentId } from '../../../../promptCustomizer/common';
 import { ToolName } from '../../../../tools/common/toolNames';
 import { GPT5CopilotIdentityRule } from '../../base/copilotIdentity';
 import { InstructionMessage } from '../../base/instructionMessage';
@@ -13,15 +14,27 @@ import { ResponseTranslationRules } from '../../base/responseTranslationRules';
 import { Gpt5SafetyRule } from '../../base/safetyRules';
 import { Tag } from '../../base/tag';
 import { MathIntegrationRules } from '../../panel/editorIntegrationRules';
-import { ApplyPatchInstructions, DefaultAgentPromptProps, detectToolCapabilities, getEditingReminder, McpToolInstructions, ReminderInstructionsProps } from '../defaultAgentInstructions';
+import { ApplyPatchInstructions, CustomPromptComponents, DefaultAgentPromptProps, detectToolCapabilities, getEditingReminder, McpToolInstructions, ReminderInstructionsProps } from '../defaultAgentInstructions';
 import { FileLinkificationInstructions } from '../fileLinkificationInstructions';
 import { CopilotIdentityRulesConstructor, IAgentPrompt, PromptRegistry, ReminderInstructionsConstructor, SafetyRulesConstructor, SystemPrompt } from '../promptRegistry';
 
 class Gpt51Prompt extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	async render(state: void, sizing: PromptSizing) {
 		const tools = detectToolCapabilities(this.props.availableTools);
+
+		// Check which components are enabled
+		const showCoreInstructions = this._customizationService.isEnabled(PromptComponentId.CoreInstructions);
+		const showOutputFormatting = this._customizationService.isEnabled(PromptComponentId.OutputFormatting);
+
 		return <InstructionMessage>
-			<Tag name='coding_agent_instructions'>
+			{showCoreInstructions && <Tag name='coding_agent_instructions'>
 				You are a coding agent running in VS Code. You are expected to be precise, safe, and helpful.<br />
 				<br />
 				Your capabilities:<br />
@@ -29,10 +42,10 @@ class Gpt51Prompt extends PromptElement<DefaultAgentPromptProps> {
 				- Receive user prompts and other context provided by the workspace, such as files in the environment.<br />
 				- Communicate with the user by streaming thinking & responses, and by making & updating plans.<br />
 				- Emit function calls to run terminal commands and apply patches.
-			</Tag>
-			<Tag name='personality'>
+			</Tag>}
+			{showCoreInstructions && <Tag name='personality'>
 				Your default personality and tone is concise, direct, and friendly. You communicate efficiently, always keeping the user clearly informed about ongoing actions without unnecessary detail. You always prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps. Unless explicitly asked, you avoid excessively verbose explanations about your work.
-			</Tag>
+			</Tag>}
 			<Tag name='autonomy_and_persistence'>
 				Persist until the task is fully handled end-to-end within the current turn whenever feasible: do not stop at analysis or partial fixes; carry changes through implementation, verification, and a clear explanation of outcomes unless the user explicitly pauses or redirects you.<br />
 				<br />
@@ -193,7 +206,7 @@ class Gpt51Prompt extends PromptElement<DefaultAgentPromptProps> {
 			</Tag>
 			{this.props.availableTools && <McpToolInstructions tools={this.props.availableTools} />}
 			{tools[ToolName.ApplyPatch] && <ApplyPatchInstructions {...this.props} tools={tools} />}
-			<Tag name='final_answer_formatting'>
+			{showOutputFormatting && <Tag name='final_answer_formatting'>
 				Your final message should read naturally, like a report from a concise teammate. For casual conversation, brainstorming tasks, or quick questions from the user, respond in a friendly, conversational tone. You should ask questions, suggest ideas, and adapt to the user's style. If you've finished a large amount of work, when describing what you've done to the user, you should follow the final answer formatting guidelines to communicate substantive changes. You don't need to add structured formatting for one-word answers, greetings, or purely conversational exchanges.<br />
 				You can skip heavy formatting for single, simple actions or confirmations. In these cases, respond in plain sentences with any relevant next step or quick option. Reserve multi-section structured responses for results that need grouping or explanation.<br />
 				The user is working on the same computer as you, and has access to your work. As such there's never a need to show the contents of files you have already written unless the user explicitly asks for them. Similarly, if you've created or modified files using `apply_patch`, there's no need to tell users to "save the file" or "copy the code into a file"—just reference the file path.<br />
@@ -263,7 +276,9 @@ class Gpt51Prompt extends PromptElement<DefaultAgentPromptProps> {
 				<br />
 				For casual greetings, acknowledgements, or other one-off conversational messages that are not delivering substantive information or structured results, respond naturally without section headers or bullet formatting.
 				<FileLinkificationInstructions />
-			</Tag>
+			</Tag>}
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<ResponseTranslationRules />
 		</InstructionMessage >;
 	}

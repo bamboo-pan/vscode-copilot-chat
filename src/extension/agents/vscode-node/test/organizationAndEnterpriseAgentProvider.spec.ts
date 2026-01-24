@@ -11,10 +11,62 @@ import { FileType } from '../../../../platform/filesystem/common/fileTypes';
 import { MockFileSystemService } from '../../../../platform/filesystem/node/test/mockFileSystemService';
 import { CustomAgentDetails, CustomAgentListItem, CustomAgentListOptions, IOctoKitService, PermissiveAuthRequiredError } from '../../../../platform/github/common/githubService';
 import { ILogService } from '../../../../platform/log/common/logService';
+import { Event } from '../../../../util/vs/base/common/event';
 import { DisposableStore } from '../../../../util/vs/base/common/lifecycle';
 import { URI } from '../../../../util/vs/base/common/uri';
+import { AgentInfo, IAgentsManagementService } from '../../../promptCustomizer/vscode-node/agentsManagementService';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { OrganizationAndEnterpriseAgentProvider } from '../organizationAndEnterpriseAgentProvider';
+
+/**
+ * Mock implementation of IAgentsManagementService for testing
+ */
+class MockAgentsManagementService implements IAgentsManagementService {
+	_serviceBrand: undefined;
+
+	private _disabledAgentIds: Set<string> = new Set();
+	private _registeredAgents: Array<{ name: string; description: string; uri: URI }> = [];
+
+	onDidChangeConfiguration: Event<void> = () => ({ dispose: () => { } });
+
+	registerAgents(agents: Array<{ name: string; description: string; uri: URI }>): void {
+		this._registeredAgents = agents;
+	}
+
+	async getAllAgents(): Promise<AgentInfo[]> {
+		return this._registeredAgents.map(a => ({
+			id: `agent:${a.name.toLowerCase().replace(/\s+/g, '-')}`,
+			name: a.name,
+			description: a.description,
+			source: 'organization' as const,
+			uri: a.uri,
+			enabled: true,
+			isReadOnly: false,
+		}));
+	}
+
+	isAgentEnabled(agentId: string): boolean {
+		return !this._disabledAgentIds.has(agentId);
+	}
+
+	async setAgentEnabled(agentId: string, enabled: boolean): Promise<void> {
+		if (enabled) {
+			this._disabledAgentIds.delete(agentId);
+		} else {
+			this._disabledAgentIds.add(agentId);
+		}
+	}
+
+	async setAllAgentsEnabled(enabled: boolean): Promise<void> {
+		if (enabled) {
+			this._disabledAgentIds.clear();
+		}
+	}
+
+	getDisabledAgentIds(): ReadonlySet<string> {
+		return this._disabledAgentIds;
+	}
+}
 
 /**
  * Mock implementation of IOctoKitService for testing
@@ -90,6 +142,7 @@ suite('OrganizationAndEnterpriseAgentProvider', () => {
 	let mockOctoKitService: MockOctoKitService;
 	let mockFileSystem: MockFileSystemService;
 	let mockExtensionContext: MockExtensionContext;
+	let mockAgentsManagementService: MockAgentsManagementService;
 	let accessor: any;
 	let provider: OrganizationAndEnterpriseAgentProvider;
 
@@ -100,6 +153,7 @@ suite('OrganizationAndEnterpriseAgentProvider', () => {
 		mockOctoKitService = new MockOctoKitService();
 		const storageUri = URI.file('/test/storage');
 		mockExtensionContext = new MockExtensionContext(storageUri);
+		mockAgentsManagementService = new MockAgentsManagementService();
 
 		// Set up testing services
 		const testingServiceCollection = createExtensionUnitTestingServices(disposables);
@@ -120,6 +174,7 @@ suite('OrganizationAndEnterpriseAgentProvider', () => {
 			accessor.get(ILogService),
 			mockExtensionContext as any,
 			mockFileSystem,
+			mockAgentsManagementService,
 		);
 		disposables.add(provider);
 		return provider;

@@ -6,25 +6,31 @@
 2. 例外
    1. 必须用英文的地方，比如代码，英文名称
 
-## 工作方式
+## Role
 
-Role: Senior Architect & Planner
+1.  Senior Architect & Planner
 
-Behavioral Rules (Manus-Style Planning)
+## 工作方式(MUST)
 
-For any complex task involving multiple steps:
-
-1.  **File-Based Memory**: You must rely on three files to manage state. If they don't exist, ask me to create them or create them yourself first:
-    -   `task_plan.md`: The single source of truth for tasks, status ([ ] vs [x]), and next steps.
-    -   `findings.md`: To store API details, research notes, and important constraints found during the process.
-    -   `progress.md`: A log of what was just completed and why.
-
+1.  **File-Based Memory**: You must rely on two files to manage state. If they don't exist, ask me to create them or create them yourself first:
+    -   `task_plan.md`: 
+        -   Task_plan is the single source of truth for tasks, status ([ ] vs [x]), and next steps.
+        -   制定task_plan的时候遵循逐步迭代增加功能的原则，优先实现最小可用版本
+    -   `progress.md`: A log of what was just completed and why,including all lesson learns.
 2.  **The "Look Before You Leap" Rule**:
-    -   Before generating any code or suggesting edits, you MUST review the content of `task_plan.md`.
+    -   Before generating any code or suggesting edits, you MUST review the content of `task_plan.md` and `progress.md`.
     -   Do not deviate from the current active task in `task_plan.md`.
+3.  **Real time update the progress**:
+    -   After finishing a step, Must explicitly update `task_plan.md` (mark as [x]) and append to `progress.md`.
+5.  **Stop Condition**:
+    -   Before saying "I'm done" or "已修复" or “已完成”
+        -    verify that all checkboxes in `task_plan.md` are checked.
+        -   verify `progress.md` is updated
 
-3.  **Update State**:
-    -   After completing a step, explicitly update `task_plan.md` (mark as [x]) and append to `progress.md`.
+## 工具选择（MUST）
 
-4.  **Stop Condition**:
-    -   Before saying "I'm done", verify that all checkboxes in `task_plan.md` are checked.
+1. 读取日志必须使用工具RunSubagent
+
+## 权限
+
+1. 禁止结束Python进程，要求用户手动操作

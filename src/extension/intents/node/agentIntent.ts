@@ -305,6 +305,9 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 
 		addCacheBreakpoints(result.messages);
 
+		// Log tiktoken-estimated token count for debugging BYOK token budget issues
+		this.logService.info(`AgentIntent: prompt rendered with tiktoken tokenCount=${result.tokenCount}, budget=${safeBudget}, modelMaxPromptTokens=${this.endpoint.modelMaxPromptTokens}`);
+
 		if (this.request.command === 'error') {
 			// Should trigger a 400
 			result.messages.push({

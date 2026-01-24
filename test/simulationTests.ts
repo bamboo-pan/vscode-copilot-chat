@@ -49,6 +49,7 @@ import './simulation/inlineEdit/inlineEdit.stest';
 import './simulation/notebookEdits.stest';
 import './simulation/notebooks.stest';
 import './simulation/prTitleAndDescription.stest';
+import './simulation/promptCustomizer.stest';
 import './simulation/renameSuggestionsProvider.stest';
 import './simulation/setupTests.stest';
 import './simulation/slash-test/testGen.cpp.stest';

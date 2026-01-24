@@ -8,13 +8,14 @@ import { ConfigKey, IConfigurationService } from '../../../../platform/configura
 import { isHiddenModelF } from '../../../../platform/endpoint/common/chatModelCapabilities';
 import { IChatEndpoint } from '../../../../platform/networking/common/networking';
 import { IExperimentationService } from '../../../../platform/telemetry/common/nullExperimentationService';
+import { IPromptCustomizationService, PromptComponentId } from '../../../promptCustomizer/common';
 import { ToolName } from '../../../tools/common/toolNames';
 import { InstructionMessage } from '../base/instructionMessage';
 import { ResponseTranslationRules } from '../base/responseTranslationRules';
 import { Tag } from '../base/tag';
 import { EXISTING_CODE_MARKER } from '../panel/codeBlockFormattingRules';
 import { MathIntegrationRules } from '../panel/editorIntegrationRules';
-import { CodesearchModeInstructions, DefaultAgentPromptProps, detectToolCapabilities, GenericEditingTips, getEditingReminder, McpToolInstructions, NotebookInstructions, ReminderInstructionsProps } from './defaultAgentInstructions';
+import { CodesearchModeInstructions, CustomPromptComponents, DefaultAgentPromptProps, detectToolCapabilities, GenericEditingTips, getEditingReminder, McpToolInstructions, NotebookInstructions, ReminderInstructionsProps } from './defaultAgentInstructions';
 import { FileLinkificationInstructions } from './fileLinkificationInstructions';
 import { IAgentPrompt, PromptRegistry, ReminderInstructionsConstructor, SystemPrompt } from './promptRegistry';
 
@@ -22,11 +23,24 @@ import { IAgentPrompt, PromptRegistry, ReminderInstructionsConstructor, SystemPr
  * Base system prompt for agent mode
  */
 export class DefaultGeminiAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	async render(state: void, sizing: PromptSizing) {
 		const tools = detectToolCapabilities(this.props.availableTools);
 
+		// Check which components are enabled
+		const showCoreInstructions = this._customizationService.isEnabled(PromptComponentId.CoreInstructions);
+		const showToolUseInstructions = this._customizationService.isEnabled(PromptComponentId.ToolUseInstructions);
+		const showEditFileInstructions = this._customizationService.isEnabled(PromptComponentId.EditFileInstructions);
+		const showOutputFormatting = this._customizationService.isEnabled(PromptComponentId.OutputFormatting);
+
 		return <InstructionMessage>
-			<Tag name='instructions'>
+			{showCoreInstructions && <Tag name='instructions'>
 				You are a highly sophisticated automated coding agent with expert-level knowledge across many different programming languages and frameworks.<br />
 				The user will ask a question, or ask you to perform a task, and it may require lots of research to answer correctly. There is a selection of tools that let you perform actions or retrieve helpful context to answer the user's question.<br />
 				You will be given some context and attachments along with the user prompt. You can use them if they are relevant to the task, and ignore them if not.{tools[ToolName.ReadFile] && <> Some attachments may be summarized with omitted sections like `/* Lines 123-456 omitted */`. You can use the {ToolName.ReadFile} tool to read more context if needed. Never pass this omitted line marker to an edit tool.</>}<br />
@@ -40,8 +54,8 @@ export class DefaultGeminiAgentPrompt extends PromptElement<DefaultAgentPromptPr
 				{!this.props.codesearchMode && tools.hasSomeEditTool && <>NEVER print out a codeblock with file changes unless the user asked for it. Use the appropriate edit tool instead.<br /></>}
 				{tools[ToolName.CoreRunInTerminal] && <>NEVER print out a codeblock with a terminal command to run unless the user asked for it. Use the {ToolName.CoreRunInTerminal} tool instead.<br /></>}
 				You don't need to read a file if it's already provided in context.
-			</Tag>
-			<Tag name='toolUseInstructions'>
+			</Tag>}
+			{showToolUseInstructions && <Tag name='toolUseInstructions'>
 				If the user is requesting a code sample, you can answer it directly without using any tools.<br />
 				When using a tool, follow the JSON schema very carefully and make sure to include ALL required properties.<br />
 				No need to ask permission before using a tool.<br />
@@ -58,9 +72,9 @@ export class DefaultGeminiAgentPrompt extends PromptElement<DefaultAgentPromptPr
 				{!tools.hasSomeEditTool && <>You don't currently have any tools available for editing files. If the user asks you to edit a file, you can ask the user to enable editing tools or print a codeblock with the suggested changes.<br /></>}
 				{!tools[ToolName.CoreRunInTerminal] && <>You don't currently have any tools available for running terminal commands. If the user asks you to run a terminal command, you can ask the user to enable terminal tools or print a codeblock with the suggested command.<br /></>}
 				Tools can be disabled by the user. You may see tools used previously in the conversation that are not currently available. Be careful to only use the tools that are currently available to you.
-			</Tag>
+			</Tag>}
 			{this.props.codesearchMode && <CodesearchModeInstructions {...this.props} />}
-			{tools[ToolName.EditFile] && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
+			{showEditFileInstructions && (tools[ToolName.EditFile] || tools[ToolName.ReplaceString]) && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
 				{tools[ToolName.ReplaceString] ?
 					<>
 						Before you edit an existing file, make sure you either already have it in the provided context, or read it with the {ToolName.ReadFile} tool, so that you can make proper changes.<br />
@@ -102,11 +116,13 @@ export class DefaultGeminiAgentPrompt extends PromptElement<DefaultAgentPromptPr
 			</Tag>}
 			{this.props.availableTools && <McpToolInstructions tools={this.props.availableTools} />}
 			<NotebookInstructions {...this.props} />
-			<Tag name='outputFormatting'>
+			<GenericEditingTips {...this.props} />
+			{showOutputFormatting && <Tag name='outputFormatting'>
 				Use proper Markdown formatting. When referring to symbols (classes, methods, variables) in user's workspace wrap in backticks. For file paths and line number rules, see fileLinkification section below<br />
 				<FileLinkificationInstructions />
-				<MathIntegrationRules />
-			</Tag>
+			</Tag>}
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<ResponseTranslationRules />
 		</InstructionMessage>;
 	}
@@ -116,11 +132,24 @@ export class DefaultGeminiAgentPrompt extends PromptElement<DefaultAgentPromptPr
  * System prompt for hidden model agent mode
  */
 export class HiddenModelFGeminiAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	async render(state: void, sizing: PromptSizing) {
 		const tools = detectToolCapabilities(this.props.availableTools);
 
+		// Check which components are enabled
+		const showCoreInstructions = this._customizationService.isEnabled(PromptComponentId.CoreInstructions);
+		const showToolUseInstructions = this._customizationService.isEnabled(PromptComponentId.ToolUseInstructions);
+		const showEditFileInstructions = this._customizationService.isEnabled(PromptComponentId.EditFileInstructions);
+		const showOutputFormatting = this._customizationService.isEnabled(PromptComponentId.OutputFormatting);
+
 		return <InstructionMessage>
-			<Tag name='instructions'>
+			{showCoreInstructions && <Tag name='instructions'>
 				You are a highly sophisticated automated coding agent with expert-level knowledge.<br />
 				You will be given some context and attachments along with the user prompt.<br />
 				{tools[ToolName.ReadFile] && <>Use {ToolName.ReadFile} to read more context if needed. Never pass the omitted line marker to an edit tool.</>}<br />
@@ -135,8 +164,8 @@ export class HiddenModelFGeminiAgentPrompt extends PromptElement<DefaultAgentPro
 				{tools[ToolName.CoreRunInTerminal] && <>NEVER print out a codeblock with a terminal command to run unless the user asked for it. Use the {ToolName.CoreRunInTerminal} tool instead.<br /></>}
 				You don't need to read a file if it's already provided in context.<br />
 				Provide updates to the user as you work. Explain what you are doing and why before using tools. Be conversational and helpful.
-			</Tag>
-			<Tag name='toolUseInstructions'>
+			</Tag>}
+			{showToolUseInstructions && <Tag name='toolUseInstructions'>
 				If the user is requesting a code sample, you can answer it directly without using any tools.<br />
 				When using a tool, follow the JSON schema very carefully and make sure to include ALL required properties.<br />
 				No need to ask permission before using a tool.<br />
@@ -153,9 +182,9 @@ export class HiddenModelFGeminiAgentPrompt extends PromptElement<DefaultAgentPro
 				{!tools.hasSomeEditTool && <>You don't currently have any tools available for editing files. If the user asks you to edit a file, you can ask the user to enable editing tools or print a codeblock with the suggested changes.<br /></>}
 				{!tools[ToolName.CoreRunInTerminal] && <>You don't currently have any tools available for running terminal commands. If the user asks you to run a terminal command, you can ask the user to enable terminal tools or print a codeblock with the suggested command.<br /></>}
 				Tools can be disabled by the user. Only use the tools that are currently available to you.
-			</Tag>
+			</Tag>}
 			{this.props.codesearchMode && <CodesearchModeInstructions {...this.props} />}
-			{tools[ToolName.EditFile] && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
+			{showEditFileInstructions && (tools[ToolName.EditFile] || tools[ToolName.ReplaceString]) && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
 				{tools[ToolName.ReplaceString] ?
 					<>
 						Before you edit an existing file, make sure you either already have it in the provided context, or read it with the {ToolName.ReadFile} tool.<br />
@@ -197,11 +226,13 @@ export class HiddenModelFGeminiAgentPrompt extends PromptElement<DefaultAgentPro
 			</Tag>}
 			{this.props.availableTools && <McpToolInstructions tools={this.props.availableTools} />}
 			<NotebookInstructions {...this.props} />
-			<Tag name='outputFormatting'>
+			{showOutputFormatting && <Tag name='outputFormatting'>
 				Use proper Markdown formatting. When referring to symbols (classes, methods, variables) in user's workspace wrap in backticks. For file paths and line number rules, see fileLinkification section below<br />
 				<FileLinkificationInstructions />
 				<MathIntegrationRules />
-			</Tag>
+			</Tag>}
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<Tag name='grounding'>
 				You are a strictly grounded assistant limited to the<br />
 				information provided in the User Context. In your answers,<br />

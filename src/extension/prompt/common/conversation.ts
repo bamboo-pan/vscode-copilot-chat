@@ -203,12 +203,16 @@ export function normalizeSummariesOnRounds(turns: readonly Turn[]): void {
 			const roundInTurn = turn.rounds.find(round => round.id === turnSummary.toolCallRoundId);
 			if (roundInTurn) {
 				roundInTurn.summary = turnSummary.text;
+				// Restore thinking data for Anthropic models with thinking enabled
+				roundInTurn.thinking = turnSummary.thinking;
 			} else {
 				const previousTurns = turns.slice(0, idx);
 				for (const turn of previousTurns) {
 					const roundInPreviousTurn = turn.rounds.find(round => round.id === turnSummary.toolCallRoundId);
 					if (roundInPreviousTurn) {
 						roundInPreviousTurn.summary = turnSummary.text;
+						// Restore thinking data for Anthropic models with thinking enabled
+						roundInPreviousTurn.thinking = turnSummary.thinking;
 						break;
 					}
 				}
@@ -362,7 +366,12 @@ export interface IResultMetadata {
 	toolCallRounds?: readonly IToolCallRound[];
 	toolCallResults?: Record<string, LanguageModelToolResult>;
 	maxToolCallsExceeded?: boolean;
-	summary?: { toolCallRoundId: string; text: string };
+	/**
+	 * Summary of conversation history for this turn.
+	 * The thinking field contains the thinking data from the summarized round,
+	 * which is required for Anthropic models with thinking enabled.
+	 */
+	summary?: { toolCallRoundId: string; text: string; thinking?: import('../../../platform/thinking/common/thinking').ThinkingData };
 }
 
 /** There may be no metadata for results coming from old persisted messages, or from messages that are currently in progress (TODO, try to handle this case) */

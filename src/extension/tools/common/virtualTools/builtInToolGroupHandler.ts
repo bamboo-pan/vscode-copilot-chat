@@ -6,7 +6,7 @@
 import type { LanguageModelToolInformation } from 'vscode';
 import { assertNever } from '../../../../util/vs/base/common/assert';
 import { groupBy } from '../../../../util/vs/base/common/collections';
-import { getToolsForCategory, toolCategories, ToolCategory, ToolName } from '../toolNames';
+import { getToolsForCategory, isInternalTool, toolCategories, ToolCategory, ToolName } from '../toolNames';
 import { VIRTUAL_TOOL_NAME_PREFIX, VirtualTool } from './virtualTool';
 import * as Constant from './virtualToolsConstants';
 
@@ -20,6 +20,18 @@ const SUMMARY_SUFFIX = '\n\nBe sure to call this tool if you need a capability r
  */
 function getCategorySummary(category: ToolCategory): string {
 	switch (category) {
+		// New fine-grained categories
+		case ToolCategory.FileRead:
+			return 'Call tools from this group when you need to read files, search for content, or explore the file system.';
+		case ToolCategory.FileEdit:
+			return 'Call tools from this group when you need to create, edit, or modify files and directories.';
+		case ToolCategory.Terminal:
+			return 'Call tools from this group when you need to run terminal commands or interact with the terminal.';
+		case ToolCategory.TaskManagement:
+			return 'Call tools from this group when you need to manage tasks, todo lists, or run VS Code tasks.';
+		case ToolCategory.AgentTools:
+			return 'Call tools from this group when you need to use subagents or manage memory.';
+		// Existing categories
 		case ToolCategory.JupyterNotebook:
 			return 'Call tools from this group when you need to work with Jupyter notebooks - creating, editing, running cells, and managing notebook operations.';
 		case ToolCategory.WebInteraction:
@@ -32,6 +44,8 @@ function getCategorySummary(category: ToolCategory): string {
 			const toolNames = getToolsForCategory(category);
 			return `These tools have overlapping functionalities but are highly specialized for certain tasks. Tools: ${toolNames.join(', ')}`;
 		}
+		case ToolCategory.ReadOnly:
+			return 'These tools are read-only and cannot be enabled/disabled by the user.';
 		case ToolCategory.Core:
 			return 'Core tools that should always be available without grouping.';
 		default:
@@ -49,8 +63,12 @@ export class BuiltInToolGroupHandler {
 			return tools;
 		}
 
-		const contributedTools = tools.filter(t => !toolCategories.hasOwnProperty(t.name));
-		const builtInTools = tools.filter(t => toolCategories.hasOwnProperty(t.name));
+		// Filter out internal tools - they should not be included in any grouping
+		// Internal tools are not sent to the model and should not be visible to users
+		const visibleTools = tools.filter(t => !isInternalTool(t.name));
+
+		const contributedTools = visibleTools.filter(t => !toolCategories.hasOwnProperty(t.name));
+		const builtInTools = visibleTools.filter(t => toolCategories.hasOwnProperty(t.name));
 
 		// Filter out Core tools from grouping (they should remain individual)
 		const toolsToGroup = builtInTools.filter(t => toolCategories[t.name as ToolName] !== ToolCategory.Core);

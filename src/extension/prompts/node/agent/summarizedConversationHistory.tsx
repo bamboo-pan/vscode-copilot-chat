@@ -10,6 +10,7 @@ import { ChatMessage } from '@vscode/prompt-tsx/dist/base/output/rawTypes';
 import type { ChatResponsePart, LanguageModelToolInformation, NotebookDocument, Progress } from 'vscode';
 import { ChatFetchResponseType, ChatLocation, ChatResponse, FetchSuccess } from '../../../../platform/chat/common/commonTypes';
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
+import { isAnthropicFamily } from '../../../../platform/endpoint/common/chatModelCapabilities';
 import { IEndpointProvider } from '../../../../platform/endpoint/common/endpointProvider';
 import { ILogService } from '../../../../platform/log/common/logService';
 import { IChatEndpoint } from '../../../../platform/networking/common/networking';
@@ -39,7 +40,6 @@ import { ChatToolCalls } from '../panel/toolCalling';
 import { AgentPrompt, AgentPromptProps, AgentUserMessage, AgentUserMessageCustomizations, getUserMessagePropsFromAgentProps, getUserMessagePropsFromTurn } from './agentPrompt';
 import { DefaultOpenAIKeepGoingReminder } from './openai/defaultOpenAIPrompt';
 import { SimpleSummarizedHistory } from './simpleSummarizedHistoryPrompt';
-import { isAnthropicFamily } from '../../../../platform/endpoint/common/chatModelCapabilities';
 
 export interface ConversationHistorySummarizationPromptProps extends SummarizedAgentHistoryProps {
 	readonly simpleMode?: boolean;
@@ -282,10 +282,12 @@ class ConversationHistory extends PromptElement<SummarizedAgentHistoryProps> {
 
 			// Find the latest tool call round that was summarized
 			const toolCallRounds: IToolCallRound[] = [];
+			let thinkingFromSummarizedRound: ThinkingData | undefined;
 			for (let i = turn.rounds.length - 1; i >= 0; i--) {
 				const round = turn.rounds[i];
-				summaryForTurn = round.summary ? new SummarizedConversationHistoryMetadata(round.id, round.summary) : undefined;
-				if (summaryForTurn) {
+				if (round.summary) {
+					summaryForTurn = new SummarizedConversationHistoryMetadata(round.id, round.summary, round.thinking);
+					thinkingFromSummarizedRound = round.thinking;
 					break;
 				}
 				toolCallRounds.push(round);
@@ -305,6 +307,13 @@ class ConversationHistory extends PromptElement<SummarizedAgentHistoryProps> {
 
 			// Reverse the tool call rounds so they are in chronological order
 			toolCallRounds.reverse();
+
+			// For Anthropic models with thinking enabled, the first assistant message after a summary
+			// must start with a thinking block. Pass the thinking from the summarized round.
+			const thinkingForFirstRound = summaryForTurn && isAnthropicFamily(this.props.endpoint) && toolCallRounds.length > 0 && !toolCallRounds[0].thinking
+				? thinkingFromSummarizedRound
+				: undefined;
+
 			turnComponents.push(<ChatToolCalls
 				flexGrow={1}
 				promptContext={this.props.promptContext}
@@ -312,6 +321,7 @@ class ConversationHistory extends PromptElement<SummarizedAgentHistoryProps> {
 				toolCallResults={toolCallResults}
 				isHistorical={!(toolCallResultInNextTurn && i === this.props.promptContext.history.length - 1)}
 				truncateAt={this.props.maxToolResultLength}
+				thinkingForFirstRoundAfterSummarization={thinkingForFirstRound}
 			/>);
 
 			history.push(...turnComponents.reverse());

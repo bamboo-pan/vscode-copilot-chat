@@ -43,6 +43,11 @@ export interface ChatToolCallsProps extends BasePromptElementProps {
 	readonly toolCallMode?: CopilotToolMode;
 	readonly enableCacheBreakpoints?: boolean;
 	readonly truncateAt?: number;
+	/**
+	 * Thinking data from the summarized round that should be attached to the first assistant message.
+	 * Required for Anthropic models with thinking enabled - each assistant message must start with a thinking block.
+	 */
+	readonly thinkingForFirstRoundAfterSummarization?: import('../../../../platform/thinking/common/thinking').ThinkingData;
 }
 
 const MAX_INPUT_VALIDATION_RETRIES = 5;
@@ -104,7 +109,12 @@ export class ChatToolCalls extends PromptElement<ChatToolCallsProps, void> {
 
 		// Don't include this when rendering and triggering summarization
 		const statefulMarker = round.statefulMarker && <StatefulMarkerContainer statefulMarker={{ modelId: this.promptEndpoint.model, marker: round.statefulMarker }} />;
-		const thinking = (!this.props.isHistorical) && round.thinking && <ThinkingDataContainer thinking={round.thinking} />;
+		// For Anthropic models with thinking enabled, each assistant message after a summary must start with a thinking block.
+		// Use thinkingForFirstRoundAfterSummarization for the first round after summarization, otherwise use the round's own thinking.
+		const thinkingData = index === 0 && this.props.thinkingForFirstRoundAfterSummarization
+			? this.props.thinkingForFirstRoundAfterSummarization
+			: (!this.props.isHistorical) ? round.thinking : undefined;
+		const thinking = thinkingData && <ThinkingDataContainer thinking={thinkingData} />;
 		children.push(
 			<AssistantMessage toolCalls={assistantToolCalls}>
 				{statefulMarker}

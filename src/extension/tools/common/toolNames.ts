@@ -9,13 +9,25 @@ import { cloneAndChange } from '../../../util/vs/base/common/objects';
  * Categories for tool grouping in the virtual tools system
  */
 export enum ToolCategory {
-	JupyterNotebook = 'Jupyter Notebook Tools',
+	// Core sub-categories (formerly all under "Core")
+	FileRead = 'File Read & Search',
+	FileEdit = 'File Edit',
+	Terminal = 'Terminal',
+	TaskManagement = 'Task & Todo',
+	AgentTools = 'Agent & Memory',
+
+	// Other categories
+	JupyterNotebook = 'Jupyter Notebook',
 	WebInteraction = 'Web Interaction',
 	VSCodeInteraction = 'VS Code Interaction',
 	Testing = 'Testing',
 	RedundantButSpecific = 'Redundant but Specific',
-	// Core tools that should not be grouped
-	Core = 'Core'
+
+	// Legacy - kept for backwards compatibility
+	Core = 'Core',
+
+	// Read-only tools - cannot be enabled/disabled by user
+	ReadOnly = 'Read Only'
 }
 
 export enum ToolName {
@@ -151,36 +163,78 @@ export function mapContributedToolNamesInSchema(inputSchema: object): object {
 }
 
 /**
+ * Set of internal tools that are NOT sent to the model and should NOT be displayed
+ * in the user-controllable tools UI. These tools are either:
+ * - Placeholder tools that are never enabled
+ * - Internal tools used by the extension infrastructure
+ * - Tools invoked directly by the extension, not by the model
+ *
+ * Users should not see these tools in the tool picker because:
+ * 1. Selecting/deselecting them has no effect on what's sent to the model
+ * 2. They are implementation details, not user-facing features
+ */
+export const internalToolNames: ReadonlySet<string> = new Set([
+	// Placeholder tool - never enabled, just a UI grouping placeholder
+	ToolName.EditFilesPlaceholder,
+	// Confirmation tools - invoked internally by extension, not by model
+	ToolName.CoreConfirmationTool,
+	ToolName.CoreTerminalConfirmationTool,
+	// Internal tools provided by VS Code core (not in ToolName enum)
+	'inline_chat_exit',
+	'vscode_editFile_internal',
+	'vscode_fetchWebPage_internal',
+]);
+
+/**
+ * Check if a tool is an internal tool that should not be shown in the UI.
+ * Internal tools are not sent to the model and should not be user-controllable.
+ */
+export function isInternalTool(toolName: string): boolean {
+	return internalToolNames.has(toolName);
+}
+
+/**
  * Type-safe mapping of all ToolName enum values to their categories.
  * This ensures that every tool is properly categorized and provides compile-time safety.
  * When new tools are added to ToolName, they must be added here or TypeScript will error.
  */
 export const toolCategories: Record<ToolName, ToolCategory> = {
-	// Core tools (not grouped - expanded by default)
-	[ToolName.Codebase]: ToolCategory.Core,
-	[ToolName.FindTextInFiles]: ToolCategory.Core,
-	[ToolName.ReadFile]: ToolCategory.Core,
-	[ToolName.CreateFile]: ToolCategory.Core,
-	[ToolName.ApplyPatch]: ToolCategory.Core,
-	[ToolName.ReplaceString]: ToolCategory.Core,
-	[ToolName.EditFile]: ToolCategory.Core,
-	[ToolName.CoreRunInTerminal]: ToolCategory.Core,
-	[ToolName.ListDirectory]: ToolCategory.Core,
-	[ToolName.CoreGetTerminalOutput]: ToolCategory.Core,
-	[ToolName.CoreManageTodoList]: ToolCategory.Core,
-	[ToolName.MultiReplaceString]: ToolCategory.Core,
-	[ToolName.FindFiles]: ToolCategory.Core,
-	[ToolName.CreateDirectory]: ToolCategory.Core,
-	[ToolName.ReadProjectStructure]: ToolCategory.Core,
-	[ToolName.CoreRunSubagent]: ToolCategory.Core,
-	[ToolName.Memory]: ToolCategory.Core,
+	// File Read & Search tools
+	[ToolName.Codebase]: ToolCategory.FileRead,
+	[ToolName.FindTextInFiles]: ToolCategory.FileRead,
+	[ToolName.ReadFile]: ToolCategory.FileRead,
+	[ToolName.ListDirectory]: ToolCategory.FileRead,
+	[ToolName.FindFiles]: ToolCategory.FileRead,
+	// Read-only - tool exists but cannot be enabled/disabled by user
+	[ToolName.ReadProjectStructure]: ToolCategory.ReadOnly,
 
-	// already enabled only when tasks are enabled
-	[ToolName.CoreRunTask]: ToolCategory.Core,
-	[ToolName.CoreGetTaskOutput]: ToolCategory.Core,
+	// File Edit tools
+	[ToolName.CreateFile]: ToolCategory.FileEdit,
+	[ToolName.EditFile]: ToolCategory.FileEdit,
+	[ToolName.ReplaceString]: ToolCategory.FileEdit,
+	// Read-only - tool exists but cannot be enabled/disabled by user
+	[ToolName.MultiReplaceString]: ToolCategory.ReadOnly,
+	[ToolName.ApplyPatch]: ToolCategory.ReadOnly,
+	[ToolName.CreateDirectory]: ToolCategory.FileEdit,
 	// never enabled, so it doesn't matter where it's categorized
-	[ToolName.EditFilesPlaceholder]: ToolCategory.Core,
+	[ToolName.EditFilesPlaceholder]: ToolCategory.FileEdit,
 
+	// Terminal tools
+	[ToolName.CoreRunInTerminal]: ToolCategory.Terminal,
+	[ToolName.CoreGetTerminalOutput]: ToolCategory.Terminal,
+	[ToolName.CoreTerminalSelection]: ToolCategory.Terminal,
+	[ToolName.CoreTerminalLastCommand]: ToolCategory.Terminal,
+	[ToolName.CoreTerminalConfirmationTool]: ToolCategory.Terminal,
+
+	// Task & Todo tools
+	[ToolName.CoreManageTodoList]: ToolCategory.TaskManagement,
+	[ToolName.CoreRunTask]: ToolCategory.TaskManagement,
+	[ToolName.CoreGetTaskOutput]: ToolCategory.TaskManagement,
+	[ToolName.CoreCreateAndRunTask]: ToolCategory.TaskManagement,
+
+	// Agent & Memory tools
+	[ToolName.CoreRunSubagent]: ToolCategory.AgentTools,
+	[ToolName.Memory]: ToolCategory.AgentTools,
 
 	// Jupyter Notebook Tools
 	[ToolName.CreateNewJupyterNotebook]: ToolCategory.JupyterNotebook,
@@ -195,7 +249,8 @@ export const toolCategories: Record<ToolName, ToolCategory> = {
 	[ToolName.GithubRepo]: ToolCategory.WebInteraction,
 
 	// VS Code Interaction
-	[ToolName.SearchWorkspaceSymbols]: ToolCategory.VSCodeInteraction,
+	// Read-only - tool exists but cannot be enabled/disabled by user
+	[ToolName.SearchWorkspaceSymbols]: ToolCategory.ReadOnly,
 	[ToolName.Usages]: ToolCategory.VSCodeInteraction,
 	[ToolName.GetErrors]: ToolCategory.VSCodeInteraction,
 	[ToolName.VSCodeAPI]: ToolCategory.VSCodeInteraction,
@@ -203,25 +258,21 @@ export const toolCategories: Record<ToolName, ToolCategory> = {
 	[ToolName.CreateNewWorkspace]: ToolCategory.VSCodeInteraction,
 	[ToolName.InstallExtension]: ToolCategory.VSCodeInteraction,
 	[ToolName.GetProjectSetupInfo]: ToolCategory.VSCodeInteraction,
-	[ToolName.CoreCreateAndRunTask]: ToolCategory.VSCodeInteraction,
 	[ToolName.RunVscodeCmd]: ToolCategory.VSCodeInteraction,
 	[ToolName.SearchViewResults]: ToolCategory.VSCodeInteraction,
-	[ToolName.CoreTerminalSelection]: ToolCategory.VSCodeInteraction,
-	[ToolName.CoreTerminalLastCommand]: ToolCategory.VSCodeInteraction,
+	[ToolName.UpdateUserPreferences]: ToolCategory.VSCodeInteraction,
+	[ToolName.CoreConfirmationTool]: ToolCategory.VSCodeInteraction,
 
 	// Testing
 	[ToolName.TestFailure]: ToolCategory.Testing,
-	[ToolName.FindTestFiles]: ToolCategory.Testing,
+	// Read-only - tool exists but cannot be enabled/disabled by user
+	[ToolName.FindTestFiles]: ToolCategory.ReadOnly,
 	[ToolName.CoreRunTest]: ToolCategory.Testing,
 
 	// Redundant but Specific
-	[ToolName.DocInfo]: ToolCategory.RedundantButSpecific,
-
-	// Other tools - categorize appropriately
-	[ToolName.UpdateUserPreferences]: ToolCategory.VSCodeInteraction,
+	// Read-only - tool exists but cannot be enabled/disabled by user
+	[ToolName.DocInfo]: ToolCategory.ReadOnly,
 	[ToolName.ToolReplay]: ToolCategory.RedundantButSpecific,
-	[ToolName.CoreConfirmationTool]: ToolCategory.VSCodeInteraction,
-	[ToolName.CoreTerminalConfirmationTool]: ToolCategory.VSCodeInteraction,
 } as const;
 
 

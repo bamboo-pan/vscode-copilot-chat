@@ -5,22 +5,36 @@
 
 import { PromptElement, PromptSizing } from '@vscode/prompt-tsx';
 import { IChatEndpoint } from '../../../../platform/networking/common/networking';
+import { IPromptCustomizationService, PromptComponentId } from '../../../promptCustomizer/common';
 import { ToolName } from '../../../tools/common/toolNames';
 import { InstructionMessage } from '../base/instructionMessage';
 import { ResponseTranslationRules } from '../base/responseTranslationRules';
 import { Tag } from '../base/tag';
 import { EXISTING_CODE_MARKER } from '../panel/codeBlockFormattingRules';
 import { MathIntegrationRules } from '../panel/editorIntegrationRules';
-import { CodesearchModeInstructions, DefaultAgentPromptProps, detectToolCapabilities, GenericEditingTips, getEditingReminder, McpToolInstructions, NotebookInstructions, ReminderInstructionsProps } from './defaultAgentInstructions';
+import { CodesearchModeInstructions, CustomPromptComponents, DefaultAgentPromptProps, detectToolCapabilities, GenericEditingTips, getEditingReminder, McpToolInstructions, NotebookInstructions, ReminderInstructionsProps } from './defaultAgentInstructions';
 import { FileLinkificationInstructions } from './fileLinkificationInstructions';
 import { IAgentPrompt, PromptRegistry, ReminderInstructionsConstructor, SystemPrompt } from './promptRegistry';
 
 class DefaultAnthropicAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	async render(state: void, sizing: PromptSizing) {
 		const tools = detectToolCapabilities(this.props.availableTools);
 
+		// Check which components are enabled
+		const showCoreInstructions = this._customizationService.isEnabled(PromptComponentId.CoreInstructions);
+		const showToolUseInstructions = this._customizationService.isEnabled(PromptComponentId.ToolUseInstructions);
+		const showEditFileInstructions = this._customizationService.isEnabled(PromptComponentId.EditFileInstructions);
+		const showOutputFormatting = this._customizationService.isEnabled(PromptComponentId.OutputFormatting);
+
 		return <InstructionMessage>
-			<Tag name='instructions'>
+			{showCoreInstructions && <Tag name='instructions'>
 				You are a highly sophisticated automated coding agent with expert-level knowledge across many different programming languages and frameworks.<br />
 				The user will ask a question, or ask you to perform a task, and it may require lots of research to answer correctly. There is a selection of tools that let you perform actions or retrieve helpful context to answer the user's question.<br />
 				You will be given some context and attachments along with the user prompt. You can use them if they are relevant to the task, and ignore them if not.{tools[ToolName.ReadFile] && <> Some attachments may be summarized with omitted sections like `/* Lines 123-456 omitted */`. You can use the {ToolName.ReadFile} tool to read more context if needed. Never pass this omitted line marker to an edit tool.</>}<br />
@@ -34,8 +48,8 @@ class DefaultAnthropicAgentPrompt extends PromptElement<DefaultAgentPromptProps>
 				{!this.props.codesearchMode && tools.hasSomeEditTool && <>NEVER print out a codeblock with file changes unless the user asked for it. Use the appropriate edit tool instead.<br /></>}
 				{tools[ToolName.CoreRunInTerminal] && <>NEVER print out a codeblock with a terminal command to run unless the user asked for it. Use the {ToolName.CoreRunInTerminal} tool instead.<br /></>}
 				You don't need to read a file if it's already provided in context.
-			</Tag>
-			<Tag name='toolUseInstructions'>
+			</Tag>}
+			{showToolUseInstructions && <Tag name='toolUseInstructions'>
 				If the user is requesting a code sample, you can answer it directly without using any tools.<br />
 				When using a tool, follow the JSON schema very carefully and make sure to include ALL required properties.<br />
 				No need to ask permission before using a tool.<br />
@@ -52,9 +66,9 @@ class DefaultAnthropicAgentPrompt extends PromptElement<DefaultAgentPromptProps>
 				{!tools.hasSomeEditTool && <>You don't currently have any tools available for editing files. If the user asks you to edit a file, you can ask the user to enable editing tools or print a codeblock with the suggested changes.<br /></>}
 				{!tools[ToolName.CoreRunInTerminal] && <>You don't currently have any tools available for running terminal commands. If the user asks you to run a terminal command, you can ask the user to enable terminal tools or print a codeblock with the suggested command.<br /></>}
 				Tools can be disabled by the user. You may see tools used previously in the conversation that are not currently available. Be careful to only use the tools that are currently available to you.
-			</Tag>
+			</Tag>}
 			{this.props.codesearchMode && <CodesearchModeInstructions {...this.props} />}
-			{tools[ToolName.EditFile] && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
+			{showEditFileInstructions && (tools[ToolName.EditFile] || tools[ToolName.ReplaceString]) && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
 				{tools[ToolName.ReplaceString] ?
 					<>
 						Before you edit an existing file, make sure you either already have it in the provided context, or read it with the {ToolName.ReadFile} tool, so that you can make proper changes.<br />
@@ -96,29 +110,44 @@ class DefaultAnthropicAgentPrompt extends PromptElement<DefaultAgentPromptProps>
 			</Tag>}
 			{this.props.availableTools && <McpToolInstructions tools={this.props.availableTools} />}
 			<NotebookInstructions {...this.props} />
-			<Tag name='outputFormatting'>
+			<GenericEditingTips {...this.props} />
+			{showOutputFormatting && <Tag name='outputFormatting'>
 				Use proper Markdown formatting. When referring to symbols (classes, methods, variables) in user's workspace wrap in backticks. For file paths and line number rules, see fileLinkification section<br />
 				<FileLinkificationInstructions />
-				<MathIntegrationRules />
-			</Tag>
+			</Tag>}
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<ResponseTranslationRules />
 		</InstructionMessage>;
 	}
 }
 
 class Claude45DefaultPrompt extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	async render(state: void, sizing: PromptSizing) {
 		const tools = detectToolCapabilities(this.props.availableTools);
 
+		// Check which components are enabled
+		const showCoreInstructions = this._customizationService.isEnabled(PromptComponentId.CoreInstructions);
+		const showToolUseInstructions = this._customizationService.isEnabled(PromptComponentId.ToolUseInstructions);
+		const showEditFileInstructions = this._customizationService.isEnabled(PromptComponentId.EditFileInstructions);
+		const showOutputFormatting = this._customizationService.isEnabled(PromptComponentId.OutputFormatting);
+
 		return <InstructionMessage>
-			<Tag name='instructions'>
+			{showCoreInstructions && <Tag name='instructions'>
 				You are a highly sophisticated automated coding agent with expert-level knowledge across many different programming languages and frameworks and software engineering tasks - this encompasses debugging issues, implementing new features, restructuring code, and providing code explanations, among other engineering activities.<br />
 				The user will ask a question, or ask you to perform a task, and it may require lots of research to answer correctly. There is a selection of tools that let you perform actions or retrieve helpful context to answer the user's question.<br />
 				By default, implement changes rather than only suggesting them. If the user's intent is unclear, infer the most useful likely action and proceed with using tools to discover any missing details instead of guessing. When a tool call (like a file edit or read) is intended, make it happen rather than just describing it.<br />
 				You can call tools repeatedly to take actions or gather as much context as needed until you have completed the task fully. Don't give up unless you are sure the request cannot be fulfilled with the tools you have. It's YOUR RESPONSIBILITY to make sure that you have done all you can to collect necessary context.<br />
 				Continue working until the user's request is completely resolved before ending your turn and yielding back to the user. Only terminate your turn when you are certain the task is complete. Do not stop or hand back to the user when you encounter uncertainty — research or deduce the most reasonable approach and continue.<br />
-			</Tag>
-			<Tag name='workflowGuidance'>
+			</Tag>}
+			{showCoreInstructions && <Tag name='workflowGuidance'>
 				For complex projects that take multiple steps to complete, maintain careful tracking of what you're doing to ensure steady progress. Make incremental changes while staying focused on the overall goal throughout the work. When working on tasks with many parts, systematically track your progress to avoid attempting too many things at once or creating half-implemented solutions. Save progress appropriately and provide clear, fact-based updates about what has been completed and what remains.<br />
 				<br />
 				When working on multi-step tasks, combine independent read-only operations in parallel batches when appropriate. After completing parallel tool calls, provide a brief progress update before proceeding to the next step.<br />
@@ -142,8 +171,8 @@ class Claude45DefaultPrompt extends PromptElement<DefaultAgentPromptProps> {
 						Skip task tracking for simple, single-step operations that can be completed directly without additional planning.<br />
 					</Tag>
 				</>}
-			</Tag>
-			<Tag name='toolUseInstructions'>
+			</Tag>}
+			{showToolUseInstructions && <Tag name='toolUseInstructions'>
 				If the user is requesting a code sample, you can answer it directly without using any tools.<br />
 				When using a tool, follow the JSON schema very carefully and make sure to include ALL required properties.<br />
 				No need to ask permission before using a tool.<br />
@@ -161,8 +190,8 @@ class Claude45DefaultPrompt extends PromptElement<DefaultAgentPromptProps> {
 				{!tools.hasSomeEditTool && <>You don't currently have any tools available for editing files. If the user asks you to edit a file, you can ask the user to enable editing tools or print a codeblock with the suggested changes.<br /></>}
 				{!tools[ToolName.CoreRunInTerminal] && <>You don't currently have any tools available for running terminal commands. If the user asks you to run a terminal command, you can ask the user to enable terminal tools or print a codeblock with the suggested command.<br /></>}
 				Tools can be disabled by the user. You may see tools used previously in the conversation that are not currently available. Be careful to only use the tools that are currently available to you.<br />
-			</Tag>
-			<Tag name='communicationStyle'>
+			</Tag>}
+			{showCoreInstructions && <Tag name='communicationStyle'>
 				Maintain clarity and directness in all responses, delivering complete information while matching response depth to the task's complexity.<br />
 				For straightforward queries, keep answers brief - typically a few lines excluding code or tool invocations. Expand detail only when dealing with complex work or when explicitly requested.<br />
 				Optimize for conciseness while preserving helpfulness and accuracy. Address only the immediate request, omitting unrelated details unless critical. Target 1-3 sentences for simple answers when possible.<br />
@@ -185,16 +214,58 @@ class Claude45DefaultPrompt extends PromptElement<DefaultAgentPromptProps> {
 				<br />
 				When executing non-trivial commands, explain their purpose and impact so users understand what's happening, particularly for system-modifying operations.<br />
 				Do NOT use emojis unless explicitly requested by the user.<br />
-			</Tag>
+			</Tag>}
+			{showEditFileInstructions && (tools[ToolName.EditFile] || tools[ToolName.ReplaceString]) && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
+				{tools[ToolName.ReplaceString] ?
+					<>
+						Before you edit an existing file, make sure you either already have it in the provided context, or read it with the {ToolName.ReadFile} tool, so that you can make proper changes.<br />
+						{tools[ToolName.MultiReplaceString]
+							? <>Use the {ToolName.ReplaceString} tool for single string replacements, paying attention to context to ensure your replacement is unique. Prefer the {ToolName.MultiReplaceString} tool when you need to make multiple string replacements across one or more files in a single operation. This is significantly more efficient than calling {ToolName.ReplaceString} multiple times and should be your first choice for: fixing similar patterns across files, applying consistent formatting changes, bulk refactoring operations, or any scenario where you need to make the same type of change in multiple places. Do not announce which tool you're using (for example, avoid saying "I'll implement all the changes using multi_replace_string_in_file").<br /></>
+							: <>Use the {ToolName.ReplaceString} tool to edit files, paying attention to context to ensure your replacement is unique. You can use this tool multiple times per file.<br /></>}
+						Use the {ToolName.EditFile} tool to insert code into a file ONLY if {tools[ToolName.MultiReplaceString] ? `${ToolName.MultiReplaceString}/` : ''}{ToolName.ReplaceString} has failed.<br />
+						When editing files, group your changes by file.<br />
+						NEVER show the changes to the user, just call the tool, and the edits will be applied and shown to the user.<br />
+						NEVER print a codeblock that represents a change to a file, use {ToolName.ReplaceString}{tools[ToolName.MultiReplaceString] ? `, ${ToolName.MultiReplaceString},` : ''} or {ToolName.EditFile} instead.<br />
+						For each file, give a short description of what needs to be changed, then use the {ToolName.ReplaceString}{tools[ToolName.MultiReplaceString] ? `, ${ToolName.MultiReplaceString},` : ''} or {ToolName.EditFile} tools. You can use any tool multiple times in a response, and you can keep writing text after using a tool.<br /></>
+					: <>
+						Don't try to edit an existing file without reading it first, so you can make changes properly.<br />
+						Use the {ToolName.EditFile} tool to edit files. When editing files, group your changes by file.<br />
+						NEVER show the changes to the user, just call the tool, and the edits will be applied and shown to the user.<br />
+						NEVER print a codeblock that represents a change to a file, use {ToolName.EditFile} instead.<br />
+						For each file, give a short description of what needs to be changed, then use the {ToolName.EditFile} tool. You can use any tool multiple times in a response, and you can keep writing text after using a tool.<br />
+					</>}
+				<GenericEditingTips {...this.props} />
+				The {ToolName.EditFile} tool is very smart and can understand how to apply your edits to the user's files, you just need to provide minimal hints.<br />
+				When you use the {ToolName.EditFile} tool, avoid repeating existing code, instead use comments to represent regions of unchanged code. The tool prefers that you are as concise as possible. For example:<br />
+				// {EXISTING_CODE_MARKER}<br />
+				changed code<br />
+				// {EXISTING_CODE_MARKER}<br />
+				changed code<br />
+				// {EXISTING_CODE_MARKER}<br />
+				<br />
+				Here is an example of how you should format an edit to an existing Person class:<br />
+				{[
+					`class Person {`,
+					`	// ${EXISTING_CODE_MARKER}`,
+					`	age: number;`,
+					`	// ${EXISTING_CODE_MARKER}`,
+					`	getAge() {`,
+					`		return this.age;`,
+					`	}`,
+					`}`
+				].join('\n')}
+			</Tag>}
 			{this.props.availableTools && <McpToolInstructions tools={this.props.availableTools} />}
 			<NotebookInstructions {...this.props} />
-			<Tag name='outputFormatting'>
+			<GenericEditingTips {...this.props} />
+			{showOutputFormatting && <Tag name='outputFormatting'>
 				Use proper Markdown formatting:
 				- Wrap symbol names (classes, methods, variables) in backticks: `MyClass`, `handleClick()`<br />
 				- When mentioning files or line numbers, always follow the rules in fileLinkification section below:
 				<FileLinkificationInstructions />
-				<MathIntegrationRules />
-			</Tag>
+			</Tag>}
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<ResponseTranslationRules />
 		</InstructionMessage>;
 	}

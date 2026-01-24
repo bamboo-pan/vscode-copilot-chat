@@ -5,6 +5,7 @@
 
 import { BasePromptElementProps, PromptElement } from '@vscode/prompt-tsx';
 import { IConfigurationService } from '../../../../platform/configuration/common/configurationService';
+import { IPromptCustomizationService, PromptComponentId } from '../../../promptCustomizer/common';
 
 export class EditorIntegrationRules extends PromptElement {
 	render() {
@@ -26,12 +27,18 @@ export class MathIntegrationRules extends PromptElement {
 
 	constructor(
 		props: BasePromptElementProps,
-		@IConfigurationService private readonly configService: IConfigurationService
+		@IConfigurationService private readonly configService: IConfigurationService,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
 	) {
 		super(props);
 	}
 
 	render() {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.MathIntegrationRules)) {
+			return undefined;
+		}
+
 		const mathEnabled = this.configService.getNonExtensionConfig<boolean>('chat.math.enabled');
 		if (mathEnabled) {
 			return (

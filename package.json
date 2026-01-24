@@ -2320,6 +2320,157 @@
 				"title": "%github.copilot.chat.applyCopilotCLIAgentSessionChanges.apply%",
 				"icon": "$(git-stash-pop)",
 				"category": "GitHub Copilot"
+			},
+			{
+				"command": "promptCustomizer.open",
+				"title": "Open Prompt Customizer",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.refresh",
+				"title": "Refresh",
+				"icon": "$(refresh)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.previewPrompt",
+				"title": "Preview Full Prompt",
+				"icon": "$(preview)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.exportConfig",
+				"title": "Export Configuration",
+				"icon": "$(export)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.importConfig",
+				"title": "Import Configuration",
+				"icon": "$(folder-opened)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.resetAll",
+				"title": "Reset All to Defaults",
+				"icon": "$(discard)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.addCustomComponent",
+				"title": "Add Custom Component",
+				"icon": "$(add)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.editComponent",
+				"title": "Edit Component",
+				"icon": "$(edit)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.viewComponent",
+				"title": "View Component",
+				"icon": "$(eye)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.resetComponent",
+				"title": "Reset to Default",
+				"icon": "$(discard)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.deleteComponent",
+				"title": "Delete Component",
+				"icon": "$(trash)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.enableComponent",
+				"title": "Enable Component",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.disableComponent",
+				"title": "Disable Component",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.enableCategory",
+				"title": "Enable All in Category",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.disableCategory",
+				"title": "Disable All in Category",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.enableAllSkills",
+				"title": "Select All",
+				"icon": "$(check-all)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.disableAllSkills",
+				"title": "Deselect All",
+				"icon": "$(close-all)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.viewAgent",
+				"title": "View Agent",
+				"icon": "$(open-preview)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.enableAllAgents",
+				"title": "Select All",
+				"icon": "$(check-all)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.disableAllAgents",
+				"title": "Deselect All",
+				"icon": "$(close-all)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.enableAllTools",
+				"title": "Select All",
+				"icon": "$(check-all)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.disableAllTools",
+				"title": "Deselect All",
+				"icon": "$(close-all)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.enableToolSubcategory",
+				"title": "Select All",
+				"icon": "$(check-all)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.disableToolSubcategory",
+				"title": "Deselect All",
+				"icon": "$(close-all)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.moveUp",
+				"title": "Move Up",
+				"icon": "$(arrow-up)",
+				"category": "Prompt Customizer"
+			},
+			{
+				"command": "promptCustomizer.moveDown",
+				"title": "Move Down",
+				"icon": "$(arrow-down)",
+				"category": "Prompt Customizer"
 			}
 		],
 		"configuration": [
@@ -4302,6 +4453,36 @@
 					"command": "github.copilot.debug.showChatLogView",
 					"when": "view == workbench.panel.chat.view.copilot",
 					"group": "3_show"
+				},
+				{
+					"command": "promptCustomizer.refresh",
+					"when": "view == promptCustomizer",
+					"group": "navigation@1"
+				},
+				{
+					"command": "promptCustomizer.previewPrompt",
+					"when": "view == promptCustomizer",
+					"group": "navigation@2"
+				},
+				{
+					"command": "promptCustomizer.addCustomComponent",
+					"when": "view == promptCustomizer",
+					"group": "navigation@3"
+				},
+				{
+					"command": "promptCustomizer.exportConfig",
+					"when": "view == promptCustomizer",
+					"group": "1_export@1"
+				},
+				{
+					"command": "promptCustomizer.importConfig",
+					"when": "view == promptCustomizer",
+					"group": "1_export@2"
+				},
+				{
+					"command": "promptCustomizer.resetAll",
+					"when": "view == promptCustomizer",
+					"group": "2_reset@1"
 				}
 			],
 			"view/item/context": [
@@ -4324,6 +4505,106 @@
 					"command": "github.copilot.chat.debug.exportPromptLogsAsJson",
 					"when": "view == copilot-chat && viewItem == chatprompt",
 					"group": "export@3"
+				},
+				{
+					"command": "promptCustomizer.editComponent",
+					"when": "view == promptCustomizer && viewItem == promptComponent",
+					"group": "1_component@1"
+				},
+				{
+					"command": "promptCustomizer.viewComponent",
+					"when": "view == promptCustomizer && viewItem == promptComponent",
+					"group": "1_component@2"
+				},
+				{
+					"command": "promptCustomizer.resetComponent",
+					"when": "view == promptCustomizer && viewItem == promptComponent",
+					"group": "2_reset@1"
+				},
+				{
+					"command": "promptCustomizer.enableComponent",
+					"when": "view == promptCustomizer && viewItem == promptComponent",
+					"group": "3_toggle@1"
+				},
+				{
+					"command": "promptCustomizer.disableComponent",
+					"when": "view == promptCustomizer && viewItem == promptComponent",
+					"group": "3_toggle@2"
+				},
+				{
+					"command": "promptCustomizer.moveUp",
+					"when": "view == promptCustomizer && viewItem == promptComponent",
+					"group": "4_order@1"
+				},
+				{
+					"command": "promptCustomizer.moveDown",
+					"when": "view == promptCustomizer && viewItem == promptComponent",
+					"group": "4_order@2"
+				},
+				{
+					"command": "promptCustomizer.editComponent",
+					"when": "view == promptCustomizer && viewItem == customPromptComponent",
+					"group": "1_component@1"
+				},
+				{
+					"command": "promptCustomizer.viewComponent",
+					"when": "view == promptCustomizer && viewItem == customPromptComponent",
+					"group": "1_component@2"
+				},
+				{
+					"command": "promptCustomizer.deleteComponent",
+					"when": "view == promptCustomizer && viewItem == customPromptComponent",
+					"group": "2_reset@1"
+				},
+				{
+					"command": "promptCustomizer.enableCategory",
+					"when": "view == promptCustomizer && viewItem == promptCategory",
+					"group": "1_category@1"
+				},
+				{
+					"command": "promptCustomizer.disableCategory",
+					"when": "view == promptCustomizer && viewItem == promptCategory",
+					"group": "1_category@2"
+				},
+				{
+					"command": "promptCustomizer.enableAllSkills",
+					"when": "view == promptCustomizer && viewItem == skillsCategory",
+					"group": "1_category@1"
+				},
+				{
+					"command": "promptCustomizer.disableAllSkills",
+					"when": "view == promptCustomizer && viewItem == skillsCategory",
+					"group": "1_category@2"
+				},
+				{
+					"command": "promptCustomizer.enableAllAgents",
+					"when": "view == promptCustomizer && viewItem == agentsCategory",
+					"group": "1_category@1"
+				},
+				{
+					"command": "promptCustomizer.disableAllAgents",
+					"when": "view == promptCustomizer && viewItem == agentsCategory",
+					"group": "1_category@2"
+				},
+				{
+					"command": "promptCustomizer.enableAllTools",
+					"when": "view == promptCustomizer && viewItem == toolsCategory",
+					"group": "1_category@1"
+				},
+				{
+					"command": "promptCustomizer.disableAllTools",
+					"when": "view == promptCustomizer && viewItem == toolsCategory",
+					"group": "1_category@2"
+				},
+				{
+					"command": "promptCustomizer.enableToolSubcategory",
+					"when": "view == promptCustomizer && viewItem == toolSubcategory",
+					"group": "1_category@1"
+				},
+				{
+					"command": "promptCustomizer.disableToolSubcategory",
+					"when": "view == promptCustomizer && viewItem == toolSubcategory",
+					"group": "1_category@2"
 				}
 			],
 			"searchPanel/aiResults/commands": [
@@ -4728,6 +5009,13 @@
 					"icon": "$(inspect)",
 					"when": "github.copilot.chat.showContextInspectorView"
 				}
+			],
+			"prompt-customizer": [
+				{
+					"id": "promptCustomizer",
+					"name": "Prompt Components",
+					"icon": "$(settings-gear)"
+				}
 			]
 		},
 		"viewsContainers": {
@@ -4741,6 +5029,11 @@
 					"id": "context-inspector",
 					"title": "Language Context Inspector",
 					"icon": "$(inspect)"
+				},
+				{
+					"id": "prompt-customizer",
+					"title": "Prompt Customizer",
+					"icon": "$(settings-gear)"
 				}
 			]
 		},
@@ -5050,6 +5343,11 @@
 				"name": "Plan",
 				"path": "./assets/agents/Plan.agent.md",
 				"description": "Researches a task to create multi-step plans"
+			},
+			{
+				"name": "Test",
+				"path": "./assets/agents/Test.agent.md",
+				"description": "A test agent for verifying Prompt Customizer agents management"
 			}
 		],
 		"chatPromptFiles": [

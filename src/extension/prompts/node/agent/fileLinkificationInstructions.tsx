@@ -4,10 +4,23 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { PromptElement } from '@vscode/prompt-tsx';
+import { IPromptCustomizationService, PromptComponentId } from '../../../promptCustomizer/common';
 import { Tag } from '../base/tag';
 
 export class FileLinkificationInstructions extends PromptElement<{}> {
+	constructor(
+		props: {},
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	render() {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.FileLinkification)) {
+			return undefined;
+		}
+
 		return <Tag name='fileLinkification'>
 			When mentioning files or line numbers, always convert them to markdown links using workspace-relative paths and 1-based line numbers.<br />
 			NO BACKTICKS ANYWHERE:<br />

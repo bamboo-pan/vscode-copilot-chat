@@ -11,6 +11,7 @@ import { IChatEndpoint } from '../../../../platform/networking/common/networking
 import { IPromptPathRepresentationService } from '../../../../platform/prompts/common/promptPathRepresentationService';
 import { IExperimentationService } from '../../../../platform/telemetry/common/nullExperimentationService';
 import { LanguageModelToolMCPSource } from '../../../../vscodeTypes';
+import { detectModelFamily, IPromptCustomizationService, PromptComponentCategory, PromptComponentId } from '../../../promptCustomizer/common';
 import { ToolName } from '../../../tools/common/toolNames';
 import { IToolsService } from '../../../tools/common/toolsService';
 import { InstructionMessage } from '../base/instructionMessage';
@@ -18,6 +19,7 @@ import { ResponseTranslationRules } from '../base/responseTranslationRules';
 import { Tag } from '../base/tag';
 import { CodeBlockFormattingRules, EXISTING_CODE_MARKER } from '../panel/codeBlockFormattingRules';
 import { MathIntegrationRules } from '../panel/editorIntegrationRules';
+import { FileLinkificationInstructions } from './fileLinkificationInstructions';
 
 // Types and interfaces for reusable components
 export interface ToolCapabilities extends Partial<Record<ToolName, boolean>> {
@@ -108,11 +110,23 @@ export class DefaultReminderInstructions extends PromptElement<ReminderInstructi
  * Base system prompt for agent mode
  */
 export class DefaultAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	async render(state: void, sizing: PromptSizing) {
 		const tools = detectToolCapabilities(this.props.availableTools);
 
+		// Check which components are enabled
+		const showCoreInstructions = this._customizationService.isEnabled(PromptComponentId.CoreInstructions);
+		const showToolUseInstructions = this._customizationService.isEnabled(PromptComponentId.ToolUseInstructions);
+		const showEditFileInstructions = this._customizationService.isEnabled(PromptComponentId.EditFileInstructions);
+
 		return <InstructionMessage>
-			<Tag name='instructions'>
+			{showCoreInstructions && <Tag name='instructions'>
 				You are a highly sophisticated automated coding agent with expert-level knowledge across many different programming languages and frameworks.<br />
 				The user will ask a question, or ask you to perform a task, and it may require lots of research to answer correctly. There is a selection of tools that let you perform actions or retrieve helpful context to answer the user's question.<br />
 				You will be given some context and attachments along with the user prompt. You can use them if they are relevant to the task, and ignore them if not.{tools[ToolName.ReadFile] && <> Some attachments may be summarized with omitted sections like `/* Lines 123-456 omitted */`. You can use the {ToolName.ReadFile} tool to read more context if needed. Never pass this omitted line marker to an edit tool.</>}<br />
@@ -126,8 +140,8 @@ export class DefaultAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 				{!this.props.codesearchMode && tools.hasSomeEditTool && <>NEVER print out a codeblock with file changes unless the user asked for it. Use the appropriate edit tool instead.<br /></>}
 				{tools[ToolName.CoreRunInTerminal] && <>NEVER print out a codeblock with a terminal command to run unless the user asked for it. Use the {ToolName.CoreRunInTerminal} tool instead.<br /></>}
 				You don't need to read a file if it's already provided in context.
-			</Tag>
-			<Tag name='toolUseInstructions'>
+			</Tag>}
+			{showToolUseInstructions && <Tag name='toolUseInstructions'>
 				If the user is requesting a code sample, you can answer it directly without using any tools.<br />
 				When using a tool, follow the JSON schema very carefully and make sure to include ALL required properties.<br />
 				No need to ask permission before using a tool.<br />
@@ -144,9 +158,9 @@ export class DefaultAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 				{!tools.hasSomeEditTool && <>You don't currently have any tools available for editing files. If the user asks you to edit a file, you can ask the user to enable editing tools or print a codeblock with the suggested changes.<br /></>}
 				{!tools[ToolName.CoreRunInTerminal] && <>You don't currently have any tools available for running terminal commands. If the user asks you to run a terminal command, you can ask the user to enable terminal tools or print a codeblock with the suggested command.<br /></>}
 				Tools can be disabled by the user. You may see tools used previously in the conversation that are not currently available. Be careful to only use the tools that are currently available to you.
-			</Tag>
+			</Tag>}
 			{this.props.codesearchMode && <CodesearchModeInstructions {...this.props} />}
-			{tools[ToolName.EditFile] && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
+			{showEditFileInstructions && (tools[ToolName.EditFile] || tools[ToolName.ReplaceString]) && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
 				{tools[ToolName.ReplaceString] ?
 					<>
 						Before you edit an existing file, make sure you either already have it in the provided context, or read it with the {ToolName.ReadFile} tool, so that you can make proper changes.<br />
@@ -189,15 +203,12 @@ export class DefaultAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
 			{tools[ToolName.ApplyPatch] && <ApplyPatchInstructions {...this.props} tools={tools} />}
 			{this.props.availableTools && <McpToolInstructions tools={this.props.availableTools} />}
 			<NotebookInstructions {...this.props} />
-			<Tag name='outputFormatting'>
-				Use proper Markdown formatting in your answers. When referring to a filename or symbol in the user's workspace, wrap it in backticks.<br />
-				<Tag name='example'>
-					The class `Person` is in `src/models/person.ts`.<br />
-					The function `calculateTotal` is defined in `lib/utils/math.ts`.<br />
-					You can find the configuration in `config/app.config.json`.
-				</Tag>
-				<MathIntegrationRules />
-			</Tag>
+			{this._customizationService.isEnabled(PromptComponentId.OutputFormatting) && <Tag name='outputFormatting'>
+				Use proper Markdown formatting. When referring to symbols (classes, methods, variables) in user's workspace wrap in backticks. For file paths and line number rules, see fileLinkification section<br />
+				<FileLinkificationInstructions />
+			</Tag>}
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<ResponseTranslationRules />
 		</InstructionMessage>;
 	}
@@ -208,12 +219,26 @@ export class DefaultAgentPrompt extends PromptElement<DefaultAgentPromptProps> {
  * for improved multi-step task execution and more systematic problem-solving approach.
  */
 export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	async render(state: void, sizing: PromptSizing) {
 		const tools = detectToolCapabilities(this.props.availableTools);
 		const isGpt5 = this.props.modelFamily?.startsWith('gpt-5') === true;
 
+		// Check which components are enabled
+		const showCoreInstructions = this._customizationService.isEnabled(PromptComponentId.CoreInstructions);
+		const showToolUseInstructions = this._customizationService.isEnabled(PromptComponentId.ToolUseInstructions);
+		const showEditFileInstructions = this._customizationService.isEnabled(PromptComponentId.EditFileInstructions);
+		const showStructuredWorkflow = this._customizationService.isEnabled(PromptComponentId.StructuredWorkflow);
+		const showCommunicationGuidelines = this._customizationService.isEnabled(PromptComponentId.CommunicationGuidelines);
+
 		return <InstructionMessage>
-			<Tag name='gptAgentInstructions'>
+			{showCoreInstructions && <Tag name='gptAgentInstructions'>
 				You are a highly sophisticated coding agent with expert-level knowledge across programming languages and frameworks.<br />
 				You will be given some context and attachments along with the user prompt. You can use them if they are relevant to the task, and ignore them if not.{tools[ToolName.ReadFile] && <> Some attachments may be summarized. You can use the {ToolName.ReadFile} tool to read more context, but only do this if the attached file is incomplete.</>}<br />
 				If you can infer the project type (languages, frameworks, and libraries) from the user's query or the context that you have, make sure to keep them in mind when making changes.<br />
@@ -221,8 +246,8 @@ export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
 				NEVER print codeblocks for file changes or terminal commands unless explicitly requested - use the appropriate tool.<br />
 				Do not repeat yourself after tool calls; continue from where you left off.<br />
 				You must use {ToolName.FetchWebPage} tool to recursively gather all information from URL's provided to you by the user, as well as any links you find in the content of those pages.
-			</Tag>
-			<Tag name='structuredWorkflow'>
+			</Tag>}
+			{showStructuredWorkflow && <Tag name='structuredWorkflow'>
 				# Workflow<br />
 				1. Understand the problem deeply. Carefully read the issue and think critically about what is required.<br />
 				2. Investigate the codebase. Explore relevant files, search for key functions, and gather context.<br />
@@ -273,14 +298,14 @@ export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
 				- Use print statements, logs, or temporary code to inspect program state, including descriptive statements or error messages to understand what's happening<br />
 				- To test hypotheses, you can also add test statements or functions<br />
 				- Revisit your assumptions if unexpected behavior occurs.<br />
-			</Tag>
-			<Tag name='communicationGuidelines'>
+			</Tag>}
+			{showCommunicationGuidelines && <Tag name='communicationGuidelines'>
 				Always communicate clearly and concisely in a warm and friendly yet professional tone. Use upbeat language and sprinkle in light, witty humor where appropriate.<br />
 				If the user corrects you, do not immediately assume they are right. Think deeply about their feedback and how you can incorporate it into your solution. Stand your ground if you have the evidence to support your conclusion.<br />
-			</Tag>
+			</Tag>}
 			{this.props.codesearchMode && <CodesearchModeInstructions {...this.props} />}
 			{/* Include the rest of the existing tool instructions but maintain GPT 4.1 specific workflow */}
-			<Tag name='toolUseInstructions'>
+			{showToolUseInstructions && <Tag name='toolUseInstructions'>
 				If the user is requesting a code sample, you can answer it directly without using any tools.<br />
 				When using a tool, follow the JSON schema very carefully and make sure to include ALL required properties.<br />
 				No need to ask permission before using a tool.<br />
@@ -298,8 +323,8 @@ export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
 				{!tools[ToolName.CoreRunInTerminal] && <>You don't currently have any tools available for running terminal commands. If the user asks you to run a terminal command, you can ask the user to enable terminal tools or print a codeblock with the suggested command.<br /></>}
 				Tools can be disabled by the user. You may see tools used previously in the conversation that are not currently available. Be careful to only use the tools that are currently available to you.<br />
 				{tools[ToolName.FetchWebPage] && <>If the user provides a URL, you MUST use the {ToolName.FetchWebPage} tool to retrieve the content from the web page. After fetching, review the content returned by {ToolName.FetchWebPage}. If you find any additional URL's or links that are relevant, use the {ToolName.FetchWebPage} tool again to retrieve those links. Recursively gather all relevant information by fetching additional links until you have all of the information that you need.</>}<br />
-			</Tag>
-			{tools[ToolName.EditFile] && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
+			</Tag>}
+			{showEditFileInstructions && (tools[ToolName.EditFile] || tools[ToolName.ReplaceString]) && !tools[ToolName.ApplyPatch] && <Tag name='editFileInstructions'>
 				{tools[ToolName.ReplaceString] ?
 					<>
 						Before you edit an existing file, make sure you either already have it in the provided context, or read it with the {ToolName.ReadFile} tool, so that you can make proper changes.<br />
@@ -344,8 +369,8 @@ export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
 			{tools[ToolName.ApplyPatch] && <ApplyPatchInstructions {...this.props} tools={tools} />}
 			{this.props.availableTools && <McpToolInstructions tools={this.props.availableTools} />}
 			<NotebookInstructions {...this.props} />
-			<Tag name='outputFormatting'>
-				Use proper Markdown formatting in your answers. When referring to a filename or symbol in the user's workspace, wrap it in backticks.<br />
+			{this._customizationService.isEnabled(PromptComponentId.OutputFormatting) && <Tag name='outputFormatting'>
+				Use proper Markdown formatting. When referring to symbols (classes, methods, variables) in user's workspace wrap in backticks. For file paths and line number rules, see fileLinkification section<br />
 				{isGpt5 && <>
 					{tools[ToolName.CoreRunInTerminal] ? <>
 						When commands are required, run them yourself in a terminal and summarize the results. Do not print runnable commands unless the user asks. If you must show them for documentation, make them clearly optional and keep one command per line.<br />
@@ -357,18 +382,29 @@ export class AlternateGPTPrompt extends PromptElement<DefaultAgentPromptProps> {
 					When listing files created/edited, include a one-line purpose for each file when helpful. In performance sections, base any metrics on actual runs from this session; note the hardware/OS context and mark estimates clearly—never fabricate numbers. In "Try it" sections, keep commands copyable; comments starting with `#` are okay, but put each command on its own line.<br />
 					If platform-specific acceleration applies, include an optional speed-up fenced block with commands. Close with a concise completion summary describing what changed and how it was verified (build/tests/linters), plus any follow-ups.<br />
 				</>}
-				<Tag name='example'>
-					The class `Person` is in `src/models/person.ts`.
-				</Tag>
-				<MathIntegrationRules />
-			</Tag>
+				<FileLinkificationInstructions />
+			</Tag>}
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<ResponseTranslationRules />
 		</InstructionMessage>;
 	}
 }
 
 export class McpToolInstructions extends PromptElement<{ tools: readonly LanguageModelToolInformation[] } & BasePromptElementProps> {
+	constructor(
+		props: { tools: readonly LanguageModelToolInformation[] } & BasePromptElementProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	render() {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.McpToolInstructions)) {
+			return undefined;
+		}
+
 		const instructions = new Map<string, string>();
 		for (const tool of this.props.tools) {
 			if (tool.source instanceof LanguageModelToolMCPSource && tool.source.instructions) {
@@ -388,7 +424,19 @@ export class McpToolInstructions extends PromptElement<{ tools: readonly Languag
  * Instructions specific to code-search mode AKA AskAgent
  */
 export class CodesearchModeInstructions extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	render(state: void, sizing: PromptSizing) {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.CodesearchModeInstructions)) {
+			return undefined;
+		}
+
 		return <>
 			<Tag name='codeSearchInstructions'>
 				These instructions only apply when the question is about the user's workspace.<br />
@@ -460,11 +508,17 @@ export class ApplyPatchInstructions extends PromptElement<DefaultAgentPromptProp
 		props: DefaultAgentPromptProps & { tools: ToolCapabilities },
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IExperimentationService private readonly _experimentationService: IExperimentationService,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
 	) {
 		super(props);
 	}
 
 	async render(state: void, sizing: PromptSizing) {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.ApplyPatchInstructions)) {
+			return undefined;
+		}
+
 		const isGpt5 = isGpt5PlusFamily(this.props.modelFamily);
 		const useSimpleInstructions = isGpt5 && this.configurationService.getExperimentBasedConfig(ConfigKey.Advanced.Gpt5AlternativePatch, this._experimentationService);
 
@@ -482,7 +536,19 @@ export class ApplyPatchInstructions extends PromptElement<DefaultAgentPromptProp
 }
 
 export class GenericEditingTips extends PromptElement<DefaultAgentPromptProps> {
+	constructor(
+		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	override render() {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.GenericEditingTips)) {
+			return undefined;
+		}
+
 		const hasTerminalTool = !!this.props.availableTools?.find(tool => tool.name === ToolName.CoreRunInTerminal);
 		return <>
 			Follow best practices when editing files. If a popular external library exists to solve a problem, use it and properly install the package e.g. {hasTerminalTool && 'with "npm install" or '}creating a "requirements.txt".<br />
@@ -495,11 +561,17 @@ export class GenericEditingTips extends PromptElement<DefaultAgentPromptProps> {
 export class NotebookInstructions extends PromptElement<DefaultAgentPromptProps> {
 	constructor(
 		props: DefaultAgentPromptProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
 	) {
 		super(props);
 	}
 
 	async render(state: void, sizing: PromptSizing) {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.NotebookInstructions)) {
+			return undefined;
+		}
+
 		const hasEditFileTool = !!this.props.availableTools?.find(tool => tool.name === ToolName.EditFile);
 		const hasEditNotebookTool = !!this.props.availableTools?.find(tool => tool.name === ToolName.EditNotebook);
 		if (!hasEditNotebookTool) {
@@ -515,5 +587,52 @@ export class NotebookInstructions extends PromptElement<DefaultAgentPromptProps>
 			Important Reminder: Avoid referencing Notebook Cell Ids in user messages. Use cell number instead.<br />
 			Important Reminder: Markdown cells cannot be executed
 		</Tag>;
+	}
+}
+/**
+ * Props for CustomPromptComponents
+ */
+export interface CustomPromptComponentsProps extends BasePromptElementProps {
+	/** The model family string (e.g., "claude", "gpt-4", "gemini") to filter components */
+	readonly modelFamily?: string;
+}
+
+/**
+ * Renders user-defined custom prompt components.
+ * These are components added by the user through the Prompt Customizer UI.
+ * Components are filtered by model family to ensure only compatible components are rendered.
+ */
+export class CustomPromptComponents extends PromptElement<CustomPromptComponentsProps> {
+	constructor(
+		props: CustomPromptComponentsProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
+	render() {
+		// Detect the ModelFamily enum from the model family string
+		const modelFamily = detectModelFamily(this.props.modelFamily);
+
+		// Get all enabled components in the Custom category, filtered by model family
+		const customComponents = this._customizationService.getComponentsByCategory(PromptComponentCategory.Custom, modelFamily);
+		const enabledCustomComponents = customComponents.filter(component =>
+			this._customizationService.isEnabled(component.id)
+		);
+
+		if (enabledCustomComponents.length === 0) {
+			return undefined;
+		}
+
+		// Render each enabled custom component with its content
+		return <>{enabledCustomComponents.map(component => {
+			const content = this._customizationService.getEffectiveContent(component.id);
+			if (!content.trim()) {
+				return undefined;
+			}
+			return <Tag name={component.id} attrs={{ customComponent: true }}>
+				{content}
+			</Tag>;
+		})}</>;
 	}
 }

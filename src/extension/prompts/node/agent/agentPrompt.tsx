@@ -25,6 +25,7 @@ import { ChatVariablesCollection } from '../../../prompt/common/chatVariablesCol
 import { getGlobalContextCacheKey, GlobalContextMessageMetadata, RenderedUserMessageMetadata, Turn } from '../../../prompt/common/conversation';
 import { InternalToolReference } from '../../../prompt/common/intents';
 import { IPromptVariablesService } from '../../../prompt/node/promptVariablesService';
+import { IPromptCustomizationService, PromptComponentId } from '../../../promptCustomizer/common';
 import { ToolName } from '../../../tools/common/toolNames';
 import { TodoListContextPrompt } from '../../../tools/node/todoListContextPrompt';
 import { IPromptEndpoint, renderPromptElement } from '../base/promptRenderer';
@@ -229,18 +230,34 @@ interface GlobalAgentContextProps extends BasePromptElementProps {
  * hint for the agent but is not updated during the conversation.
  */
 class GlobalAgentContext extends PromptElement<GlobalAgentContextProps> {
+	constructor(
+		props: GlobalAgentContextProps,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService
+	) {
+		super(props);
+	}
+
 	render() {
+		const showEnvironmentInfo = this._customizationService.isEnabled(PromptComponentId.EnvironmentInfo);
+		const showWorkspaceInfo = this._customizationService.isEnabled(PromptComponentId.WorkspaceInfo);
+
+		// If no content to show, don't render an empty UserMessage (which can cause API errors)
+		const hasAnyContent = showEnvironmentInfo || showWorkspaceInfo;
+		if (!hasAnyContent) {
+			return undefined;
+		}
+
 		return <UserMessage>
-			<Tag name='environment_info'>
+			{showEnvironmentInfo && <Tag name='environment_info'>
 				<UserOSPrompt />
-			</Tag>
-			<Tag name='workspace_info'>
+			</Tag>}
+			{showWorkspaceInfo && <Tag name='workspace_info'>
 				<TokenLimit max={2000}>
 					<AgentTasksInstructions availableTools={this.props.availableTools} />
 				</TokenLimit>
 				<WorkspaceFoldersHint />
 				<AgentMultirootWorkspaceStructure maxSize={2000} excludeDotFiles={true} availableTools={this.props.availableTools} />
-			</Tag>
+			</Tag>}
 			<UserPreferences flexGrow={7} priority={800} />
 			{this.props.enableCacheBreakpoints && <cacheBreakpoint type={CacheType} />}
 		</UserMessage>;
@@ -310,7 +327,8 @@ export class AgentUserMessage extends PromptElement<AgentUserMessageProps> {
 	constructor(
 		props: AgentUserMessageProps,
 		@IPromptVariablesService private readonly promptVariablesService: IPromptVariablesService,
-		@ILogService private readonly logService: ILogService
+		@ILogService private readonly logService: ILogService,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService
 	) {
 		super(props);
 	}
@@ -351,6 +369,10 @@ export class AgentUserMessage extends PromptElement<AgentUserMessageProps> {
 			toolReferences: this.props.toolReferences,
 		};
 
+		// Check if context and reminder components are enabled
+		const showCurrentContext = this._customizationService.isEnabled(PromptComponentId.CurrentContext);
+		const showReminderInstructions = this._customizationService.isEnabled(PromptComponentId.ReminderInstructions);
+
 		return (
 			<>
 				<UserMessage>
@@ -359,19 +381,19 @@ export class AgentUserMessage extends PromptElement<AgentUserMessageProps> {
 						<ChatVariables chatVariables={this.props.chatVariables} isAgent={true} omitReferences />
 					</TokenLimit>
 					<ToolReferencesHintClass {...toolReferencesHintProps} />
-					<Tag name='context'>
+					{showCurrentContext && <Tag name='context'>
 						<CurrentDatePrompt />
 						<EditedFileEvents editedFileEvents={this.props.editedFileEvents} />
 						<NotebookSummaryChange />
 						{hasTerminalTool && <TerminalStatePromptElement sessionId={this.props.sessionId} />}
 						{hasTodoTool && <TodoListContextPrompt sessionId={this.props.sessionId} />}
-					</Tag>
+					</Tag>}
 					<CurrentEditorContext endpoint={this.props.endpoint} />
-					<Tag name='reminderInstructions'>
+					{showReminderInstructions && <Tag name='reminderInstructions'>
 						{/* Critical reminders that are effective when repeated right next to the user message */}
 						<ReminderInstructionsClass {...reminderProps} />
 						<NotebookReminderInstructions chatVariables={this.props.chatVariables} query={this.props.request} />
-					</Tag>
+					</Tag>}
 					{query && <Tag name={userQueryTagName} priority={900} flexGrow={7}>{query + attachmentHint}</Tag>}
 					{this.props.enableCacheBreakpoints && <cacheBreakpoint type={CacheType} />}
 				</UserMessage>

@@ -10,7 +10,8 @@ import { ToolName } from '../../../tools/common/toolNames';
 import { InstructionMessage } from '../base/instructionMessage';
 import { ResponseTranslationRules } from '../base/responseTranslationRules';
 import { Tag } from '../base/tag';
-import { DefaultAgentPromptProps, detectToolCapabilities, getEditingReminder, McpToolInstructions, NotebookInstructions, ReminderInstructionsProps } from './defaultAgentInstructions';
+import { MathIntegrationRules } from '../panel/editorIntegrationRules';
+import { CustomPromptComponents, DefaultAgentPromptProps, detectToolCapabilities, getEditingReminder, McpToolInstructions, NotebookInstructions, ReminderInstructionsProps } from './defaultAgentInstructions';
 import { IAgentPrompt, PromptRegistry, ReminderInstructionsConstructor, SystemPrompt } from './promptRegistry';
 
 class VSCModelPromptA extends PromptElement<DefaultAgentPromptProps> {
@@ -168,6 +169,8 @@ class VSCModelPromptA extends PromptElement<DefaultAgentPromptProps> {
 			</Tag>
 			{this.props.availableTools && <McpToolInstructions tools={this.props.availableTools} />}
 			<NotebookInstructions {...this.props} />
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 			<ResponseTranslationRules />
 		</InstructionMessage>;
 	}
@@ -261,6 +264,8 @@ class VSCModelPromptB extends PromptElement<DefaultAgentPromptProps> {
 				<br />
 				Always prefer a short and concise answer without extending too much.<br />
 			</Tag>
+			<MathIntegrationRules />
+			<CustomPromptComponents modelFamily={this.props.modelFamily} />
 		</InstructionMessage>;
 	}
 }

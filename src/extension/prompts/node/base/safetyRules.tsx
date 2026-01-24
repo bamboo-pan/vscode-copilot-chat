@@ -4,9 +4,29 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { PromptElement } from '@vscode/prompt-tsx';
+import { IPromptCustomizationService, PromptComponentId } from '../../../promptCustomizer/common';
 
 export class SafetyRules extends PromptElement {
+	constructor(
+		props: any,
+		@IPromptCustomizationService private readonly _customizationService: IPromptCustomizationService,
+	) {
+		super(props);
+	}
+
 	render() {
+		// Check if this component is enabled in the customization service
+		if (!this._customizationService.isEnabled(PromptComponentId.SafetyRules)) {
+			return undefined;
+		}
+
+		// Check if there's custom content
+		if (this._customizationService.hasCustomContent(PromptComponentId.SafetyRules)) {
+			const customContent = this._customizationService.getEffectiveContent(PromptComponentId.SafetyRules);
+			return <>{customContent}</>;
+		}
+
+		// Default content
 		return (
 			<>
 				Follow Microsoft content policies.<br />
